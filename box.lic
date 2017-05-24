@@ -1,0 +1,1014 @@
+=begin
+  Various utilities for handling lockpicking, disarming and boxes -- for those who don't want to fully automate but
+	would still like some convenience functions.  Also has some utility for those getting boxes picked.
+
+  Usage:
+   ;box HELP                Shows this help text.
+
+   ;box EMPTY [<container>] Open the currently held box, gather the coins, and empty it into the specified
+                            container (or your default lootsack)
+   ;box GRAB [<container>]  Attempts to grab a closed (and presumably locked) box from the specified
+                            inventory container(s), or any inventory container if none are specified.
+                            Separate multiple container names with commas or semicolons.
+   ;box LIST [<container>]  List known boxes in the specifed containers(s), or all containers if no
+                            container is specified.
+
+   ;box STATUS              Shows your current lootsack and most recent customer.
+
+   ;box LOOTSACK [<cont>]   Sets/shows your current lootsack.  Note that this affects ALL Lich scripts.
+
+   ;box SCAN                LOOKs in all of your containers to attempt to force inventory information
+                            to refresh.  Use this if GRAB or LIST are acting up.  Will not examine
+                            closed containers, or containers that are in other containers.
+
+   ;box ACCEPT {WAIT}       ACCEPT an offer and remember who offered it.  If 'WAIT' is specified, will
+                            wait for an offer if one is not currently pending.  Items that do not look
+                            like boxes will not be automatically accepted.
+
+   ;box RETURN [<player>]   Return the box you recently accepted to whoever offered it to you, or to
+                            <player>
+
+   ;box NEXT [<player>]     Same as doing ';box RETURN <player>' and ';box ACCEPT wait', in
+                            that order.
+
+   ;box DISARM or DETECT    Disarm the currently held box, whatever it happens to be named -- or detect
+                            traps without attempting to disarm.
+
+   ;box DETECT              Detect traps on the current held box (without trying to disarm them).
+
+   ;box UNLOCK [<lockpick>] Unlock the currently held box using the specified lockpick.  If <lockpick>
+                            consists of multiple words, this will try to find any matching lockpick,
+                            even if the adjectives do not match the game's adjectives.  For instance,
+                            ';box vaalin lockpick' will 'a/dark vaalin/lockpick', even though you
+                            would normally need to type 'get my dark lockpick'
+                            If no lockpick is specified, whatever item you are holding (other than the
+                            box) is assumed to be the lockpick you want to use.
+
+   ;box COMMAND             Shows or changes the current command used to pick boxes.  Useful for using
+                            lock mastery.  Type ;box COMMAND by itself to see more details on this
+                            option.
+
+
+   ;box WINDOW [<option>]   Configures the lockpicking results window, where <option> is one of:
+                            OFF, ON, SAVE, CLEAR, or SHOW.  WINDOW by itself will show the current
+                            configuration.  Only available in StormFront.  EXPERIMENTAL.
+
+  This script is oblivious to items that are in closed containers.
+
+	  author: LostRanger (thisgenericname@gmail.com)
+	  game: GemStone
+	  tags: lockpicking
+	  required: Lich >= 4.6.0.
+
+  version: 0.7 (2017-05-13)
+
+  changelog:
+    version 0.7 (2017-05-13)
+      * Possible fix to an issue where lockpick messaging would not always end up in the lockpicking window, and would
+        be duplicated in the story window instead (Stormfront Only)
+      * Fix HELP being broken for non-rogues (introduced in 0.6)
+
+    version 0.6 (2017-05-12)
+      * (StormFront only) add experimental support for copying all lockpicking results to a custom window.
+      * add support for DETECT instead of DISARM
+
+    version 0.5 (2017-05-09)
+      * add support for calipers using ;box measure (to measure) and ;box calipers (to specify is your calipers)
+
+    version 0.4 (2017-05-06)
+      * figure out which lockpick to use before storing the one you were previously holding.  Prevents an issue where
+        the container would be updating as ;box searched for the new lockpick, thus causing it to not finding it.
+
+    version 0.3 (2017-05-01)
+      * now attempts to return your lockpick from whence it came when emptying a box and prior to accepting a new box.
+      * hides locksmith-specific help from non-locksmiths unless they ask for HELP FULL
+      * preemptively waitrt in some places to avoid attempting commands that will always fail in roundtime
+      * improve ;box scan to use INV CONTAINERS
+
+    version 0.2 (2017-04-27)
+      * can now change command used for lockpicking (for use with lockmastery); see ;box COMMAND
+
+    version 0.1 (2017-04-22)
+      * initial release
+=end
+
+
+# Messaging for the future
+# You carefully begin to examine...
+
+#
+# class XMLFilter
+#   def initialize(whitelist = ['a'])
+#     @whitelist = Set.new(whitelist)
+#     @blacklist_depth = 0
+#   end
+#
+#
+#
+#   @output = []
+#   include REXML::StreamListener
+# end
+#
+
+CharSettings['lockpick_command'] = 'pick $B with $L' unless CharSettings['lockpick_command']
+CharSettings['calipers'] = 'calipers' unless CharSettings['calipers']
+CharSettings['window'] = 'on' if CharSettings['window'].nil?
+
+# We don't want to store this in the DB since it's only relevant for the current session.
+
+unless $_box_script_status
+  $_box_script_status = {
+      :scanned => false,
+      :lasttool => nil,
+      :lastcontainer => nil,
+      :windowcreated => false,
+      :lastboxid => nil,  # Last box we handled, to properly add delineations
+  }
+end
+
+
+class RingBuffer
+  # Only partially implemented
+  def initialize(maxlength)
+    @maxlength = maxlength
+    @contents = []
+    @pos = 0
+  end
+
+  def to_a
+    # At position 0, or if not full yet, we can return the entire array as-is.
+    return @contents.dup if @contents.length < @maxlength or @pos == 0
+    return @contents[@pos..-1] + @contents[0..@pos-1]
+  end
+
+  def push(what)
+    @contents[@pos] = what
+    @pos = 0 if(@pos += 1) >= @maxlength
+  end
+end
+
+
+class BoxScript
+  VERSION = '0.7 (2017-05-13)'
+  BOX_NOUNS = %w(box strongbox chest coffer trunk).to_set
+  @script = nil
+
+  def initialize(script)
+    @script = script
+    @script.want_upstream = false
+    @script.want_downstream = false
+    @script.want_downstream_xml = true
+    @buffer = []
+
+    @window_option = CharSettings['window']
+  end
+
+  def condense
+    result = @buffer.join('')
+    @buffer = []
+    result
+  end
+
+  def flush
+    result = condense
+    unless result == ''
+      puts result
+    end
+    result
+  end
+
+  def find_boxes(contents, want_closed = nil)
+    return [] unless contents
+    contents.select{|box|
+      next(false) unless BOX_NOUNS.include?(box.noun)
+      next(true) if want_closed == nil
+      # echo box.contents.inspect
+      (box.contents == nil) == want_closed
+    }
+  end
+
+  def find_held_box
+    if GameObj.right_hand and BOX_NOUNS.include?(GameObj.right_hand.noun)
+      return GameObj.right_hand
+    elsif GameObj.left_hand and BOX_NOUNS.include?(GameObj.left_hand.noun)
+      return GameObj.left_hand
+    end
+    nil
+  end
+
+  def text_to_words(text)
+    words = text.split(/\s+/)
+    words = words[1..-1] if words.length > 1 and words.first == 'my'
+    words
+  end
+
+  def find_matching_item(items, words)
+    # Returns the first matching item, nil if no match.
+    items.find{|item|
+      noun = item.noun.downcase
+      next(false) unless noun.start_with?(words.last)
+      next(true) if words.length < 2
+      adjectives, *unused = item.name.downcase.rpartition(noun)
+      words[0..-2].all?{|word|
+        adjectives.start_with?(word) or adjectives.include?(" " + word)
+      }
+    }
+  end
+
+  def filter_items(items, filters)
+    unless filters
+      return items
+    end
+    # Convert filter to a list of strings split out by word.
+    filters = filters.strip.downcase.split(/\s*[,;]\s*/).map!{|text|
+      text_to_words(text)
+    }
+
+    filters.map{|filter|
+      item = find_matching_item(items, filter)
+      unless item
+        echo "I could not find your '#{filter.join(" ")}'."
+        return nil
+      end
+      item
+    }
+  end
+
+  def window_command(args = nil)
+    unless $frontend == 'stormfront'
+      echo 'This command is only available in the StormFront FE'
+      return
+    end
+    args = args.downcase.strip if args
+    case args
+      when 'on', 'true'
+        CharSettings['window'] = @window_option = true
+        echo 'The locksmithing window is now enabled.'
+      when 'off', 'false'
+        CharSettings['window'] = @window_option = false
+        echo 'The locksmithing window is now disabled.'
+      when 'save'
+        CharSettings['window'] = @window_option = 'save'
+        echo 'The locksmithing window is now enabled, and its window location should now persist across sessions.'
+      when 'show'
+        unless @window_option
+            echo 'The locksmithing window is currently disabled, and cannot be shown.'
+          return
+        end
+        expose_window
+      when 'clear'
+        unless $_box_script_status[:windowcreated]
+          echo "Cannot clear the locksmithing window because it hasn't yet been created."
+          return
+        end
+        @buffer << '<clearStream id="boxresults" />'
+      when nil
+        if @window_option
+          echo 'The locksmithing window is currently enabled.'
+          if @window_option == 'save'
+            echo "The locksmithing window's position will hypothetically be saved in Stormfront across sesssions."
+          end
+        else
+          echo 'The locksmithing window is currently disabled.'
+        end
+      else
+        echo 'Subcommand not recognized, expected one of ON, OFF, SAVE, SHOW, or CLEAR.'
+    end
+    flush
+  end
+
+  def is_locksmith?
+    Stats.prof == 'Rogue' or Skills.disarmingtraps > 0 or Skills.pickinglocks > 0
+  end
+
+  def help_command(args = nil)
+    script = "#{$lich_char}#{@script.name}"
+    spacer = ''.ljust(script.length, ' ')
+    respond "#{script} version #{VERSION}"
+    respond "Usage:"
+    respond
+    respond "   #{script} HELP                Shows this help text."
+    respond
+    respond "   #{script} EMPTY [<container>] Open the currently held box, gather the coins, and empty it into the specified"
+    respond "   #{spacer}                     container (or your default lootsack)"
+
+    respond "   #{script} GRAB [<container>]  Attempts to grab a closed (and presumably locked) box from the specified "
+    respond "   #{spacer}                     inventory container(s), or any inventory container if none are specified."
+    respond "   #{spacer}                     Separate multiple container names with commas or semicolons."
+
+    respond "   #{script} LIST [<container>]  List known boxes in the specifed containers(s), or all containers if no"
+    respond "   #{spacer}                     container is specified."
+    respond
+    respond "   #{script} STATUS              Shows your current lootsack and most recent customer."
+    respond
+    respond "   #{script} LOOTSACK [<cont>]   Sets/shows your current lootsack.  Note that this affects ALL Lich scripts."
+    respond
+    respond "   #{script} SCAN                LOOKs in all of your containers to attempt to force inventory information"
+    respond "   #{spacer}                     to refresh.  Use this if GRAB or LIST are acting up.  Will not examine"
+    respond "   #{spacer}                     closed containers, or containers that are in other containers."
+    respond
+
+    if is_locksmith? or args.downcase == 'full'
+      respond "   #{script} ACCEPT [WAIT]       ACCEPT an offer and remember who offered it.  If 'WAIT' is specified, will"
+      respond "   #{spacer}                     wait for an offer if one is not currently pending.  Items that do not look"
+      respond "   #{spacer}                     like boxes will not be automatically accepted."
+      respond
+      respond "   #{script} RETURN [<player>]   Return the box you recently accepted to whoever offered it to you, or to"
+      respond "   #{spacer}                     <player>"
+      respond
+      respond "   #{script} NEXT [<player>]     Same as doing '#{script} RETURN <player>' and '#{script} ACCEPT wait', in"
+      respond "   #{spacer}                     that order."
+      respond
+      respond "   #{script} DISARM or DETECT    Disarm the currently held box, whatever it happens to be named -- or detect"
+      respond "   #{spacer}                     traps without attempting to disarm."
+      respond
+      respond "   #{script} UNLOCK [<lockpick>] Unlock the currently held box using the specified lockpick (or the lockpick"
+      respond "   #{spacer}                     currently in your hands).  If <lockpick> consists of multiple words, this "
+      respond "   #{spacer}                     will try to find any lockpick with the same noun and any matching adjectives,"
+      respond "   #{spacer}                     even if those adjectives do not match what the game expects.  For instance, "
+      respond "   #{spacer}                     '#{script} vaalin lockpick' will grab 'a/dark vaalin/lockpick', even though"
+      respond "   #{spacer}                     you would normally need to type 'get my dark lockpick'."
+      respond
+      respond "   #{script} CALIPERS [<item>]   Set or show which calipers you are currently using."
+      respond
+      respond "   #{script} MEASURE             Measure the box you are holding with your calipers."
+      respond
+      respond "   #{script} CALIBRATE           Calibrate your calipers."
+      respond
+      respond "   #{script} DROP                Drop your box and return your current tool to where it came from."
+      respond
+      respond "   #{script} COMMAND             Shows or changes the current command used to pick boxes.  Useful for using"
+      respond "   #{spacer}                     lock mastery.  Type #{script} COMMAND by itself to see more details on this"
+      respond "   #{spacer}                     option."
+      respond
+      respond "   #{script} WINDOW [<option>]   Configures the lockpicking results window, where <option> is one of:"
+      respond "   #{spacer}                     OFF, ON, SAVE, CLEAR, or SHOW.  WINDOW by itself will show the current "
+      respond "   #{spacer}                     configuration.  Only available in StormFront.  EXPERIMENTAL."
+      respond
+      respond "#{script} remembers the last tool (lockpick or calipers) that it grabbed and the container that it came from."
+      respond "ACCEPT, NEXT, EMPTY, UNLOCK (if specifying a lockpick) and MEASURE will all return the tool to that same"
+      respond "container if you are still holding the tool and still wearing the container."
+      # respond
+      # respond "   #{script} PICKSACK [<cont>]   Sets/shows your preferred container to store lockpicks in.  Only affects"
+      # respond "   #{spacer}                     this script."
+    else
+      respond "The above options are most useful for all characters.  For commands primarily of interest to those who"
+      respond "are opening boxes, see #{script} HELP FULL."
+      respond "[Rogues and characters with at least one rank of Lockpicking or Disarming will always see the full help]"
+    end
+    respond
+    respond "This script is oblivious to items that are in closed containers."
+    respond
+
+    status_command
+  end
+  def status_command(args = nil)
+    lootsack_command(nil)
+    cust = CharSettings['customer']
+    if cust
+      diff = (DateTime.now - cust['when'])
+      if diff < 0  # ???
+        ago = "at some point in the wibbly-wobbly timey-wimey future"
+      elsif (diff * 86400) < 5
+        ago = "moments ago"
+      elsif (diff * 86400) < 90
+        ago = "#{(diff * 86400).to_i} seconds ago"
+      elsif (diff * 1440) < 2
+        ago = "about a minute ago"
+      elsif (diff * 1440) < 90
+        ago = "about #{(diff * 1440).to_i} minutes ago"
+      else
+        ago = "at #{cust['when']}"
+      end
+      respond "Your most recent customer was #{cust['name']}, who offered you #{cust['box']} #{ago}."
+    else
+      respond "You have no recorded recent customers."
+    end
+  end
+
+  def command_command(args)
+    unless args
+      respond "Your current lockpicking command is: #{CharSettings['lockpick_command']}"
+      respond
+      respond "To change it, use '#{$lich_char}#{@script.name} COMMAND command to send', using '$L' in place of your"
+      respond "lockpick and '$B' in place of your box.  Some examples:"
+      respond
+      respond "#{$lich_char}#{@script.name} COMMAND pick $B with $L"
+      respond "#{$lich_char}#{@script.name} COMMAND lmas ptrick spin $B"
+      respond
+      respond "Note: do not use MY in these commands, as an exact reference to the target box and pick is already supplied";
+    else
+      respond "Your lockpicking command has been changed to: #{args}."
+      CharSettings['lockpick_command'] = args
+    end
+  end
+
+  def accept_command(args)
+    @script.want_downstream = true
+    @script.want_downstream_xml = false
+
+    store_tool
+    wait = false
+    waiting = false
+    if args
+      if args.downcase == "wait"
+        wait = true
+      else
+        echo "Use #{$lich_char}#{@script.name} ACCEPT to accept an offer, or #{$lich_char}#{@script.name} ACCEPT WAIT to wait for an offer if needed."
+        return
+      end
+    end
+    waitrt?
+    fput 'accept'
+    loop {
+      line = get
+      if line == "You have no offers to accept."
+        if wait
+          waiting = true
+        else
+          echo "Use #{$lich_char}#{@script.name} ACCEPT WAIT to wait for an offer before accepting."
+          return
+        end
+      end
+      if line =~ /^You accept ([^']+)'s offer and are now holding (.* ([^ ]+) (box|strongbox|coffer|chest|trunk))\./
+        CharSettings['customer'] = {
+          'name' => $1,
+          'box'  => $2,
+          'adjective'  => $3,
+          'noun' => $4,
+          'when' => DateTime.now
+        }
+        # echo CharSettings['customer'].inspect
+        echo "Accepted #{$2} from #{$1}."
+        return
+      end
+      if waiting and line =~ /^([^ ]+) offers you .*(box|strongbox|coffer|chest|trunk).*  The offer will expire in 30 seconds.$/
+        waitrt?
+        fput 'accept'
+      end
+    }
+  end
+
+  def window_allowed?
+    $frontend == 'stormfront' and @window_option
+  end
+
+  def checknewbox(box)
+    return unless window_allowed?
+    if box.id != $_box_script_status[:lastboxid]
+      write_window("\n<style id=\"roomName\" />[#{box.name}]\n<style id=\"\" />")
+      $_box_script_status[:lastboxid] = box.id
+    end
+  end
+
+  def resolve_containers(args)
+    if args
+      items = filter_items(GameObj.inv, args)
+      return unless items
+    else
+      items = GameObj.inv
+    end
+    containers = {}
+    items.each{|x|
+      containers[x.id] = x.contents if x.contents != nil
+    }
+    return containers
+    #
+    # return GameObj.containers
+  end
+
+  def return_command(name = nil)
+    unless CharSettings['customer']
+      echo "I don't have anybody to return something to."
+      return
+    end
+    # echo CharSettings['customer'].inspect
+    c = CharSettings['customer']
+    name = c['name'] unless name
+    waitrt?
+    fput "give my #{c['adjective']} #{c['noun']} to #{name}"
+  end
+
+  def next_command(name = nil)
+    unless CharSettings['customer']
+      echo "I don't have anybody to return something to."
+      return
+    end
+    return_command(name)
+    accept_command('wait')
+  end
+
+
+  def list_command(args)
+    containers = resolve_containers(args)
+    return unless containers
+    boxes = {true => {}, false => {}}
+
+    containers.each{|id, contents|
+      find_boxes(contents).each{|box|
+        closed = (box.contents == nil)
+        if boxes[closed][id] == nil
+          boxes[closed][id] = []
+        end
+        boxes[closed][id].push(box)
+      }
+    }
+
+    count = boxes[true].reduce(0){|memo, (exist, contents)| memo + contents.length}
+    if count > 0
+      if count > 1
+        respond "Found #{count} apparently closed (and presumably locked) boxes:"
+      else
+        respond "Found #{count} apparently closed (and presumably locked) box:"
+      end
+
+      GameObj.inv.each{|container|
+        next unless boxes[true][container.id]
+        writelink("In your ", container, ":")
+        boxes[true][container.id].each{|box| writelink("    ", box)}
+        respond
+      }
+    else
+      if args
+        respond "You do not appear to have any locked boxes in the specified container(s)."
+      else
+        respond "You do not appear to have any locked boxes."
+      end
+    end
+
+    count = boxes[false].reduce(0){|memo, (exist, contents)| memo + contents.length}
+    if count > 0
+      if count > 1
+        respond "Found #{count} opened (possibly empty) boxes:"
+      else
+        respond "Found #{count} opened (possibly empty) box:"
+      end
+
+      GameObj.inv.each{|container|
+        next unless boxes[false][container.id]
+        writelink("In your ", container, ":")
+        boxes[false][container.id].each{|box|
+          case box.contents.length
+            when 0
+              after = " (empty)"
+            when 1
+              after = " (1 item)"
+            else
+              after = " (#{box.contents.length} items)"
+          end
+          writelink("    ", box, after)
+        }
+        respond
+      }
+    end
+  end
+
+  def can_store_tool
+    pick = $_box_script_status[:lasttool]
+    container = $_box_script_status[:lastcontainer]
+    # Like store_lockpick, but doesn't actually store it.
+    return false unless $_box_script_status[:lasttool] and $_box_script_status[:lastcontainer]
+    return false unless GameObj.right_hand.id == pick or GameObj.left_hand.id == pick
+    return false unless GameObj.inv.find{|item| item.id == container}
+    return true
+  end
+
+  def store_tool
+    # If the last grabbed lockpick is still being held, attempt to safely return it to where we got it from.
+    # Make sure it's part of our inventory first though, so we don't put it in a container that has since moved to
+    # the ground or anything like that.
+    return false unless can_store_tool
+    # Returns true if successful-ish
+    pick = $_box_script_status[:lasttool]
+    container = $_box_script_status[:lastcontainer]
+
+    waitrt?
+    fput "put ##{pick} in ##{container}"
+    true
+  end
+
+  def grab_command(args)
+    containers = resolve_containers(args)
+    return unless containers
+    containers.each{|id, contents|
+      find_boxes(contents, true).each{|box|
+        # echo box.inspect
+        fput "get ##{box.id} from ##{id}"
+        return
+      }
+    }
+    echo "I could not locate a locked box on your person."
+  end
+
+  def drop_command(args)
+    box = find_held_box
+    unless box
+      echo "You don't appear to have a box in your hands."
+      return
+    end
+    waitrt?
+    fput "drop ##{box.id}"
+    store_tool
+  end
+
+  def disarm_detect_command(args, command)
+    box = find_held_box
+    unless box
+      echo "You don't appear to have a box in your hands."
+      return
+    end
+    checknewbox(box)
+    waitrt?
+    start_capture("<a exist=\"#{box.id}\"")
+    fput "#{command} ##{box.id}"
+  end
+
+  def tool_command(
+      args,
+      template,
+      tool_not_found_message,
+      empty_hands_message,
+      &block
+  )
+    new_last_tool = new_last_container = nil
+    box = find_held_box
+    unless box
+      echo "You don't appear to have a box in your hands."
+      return
+    end
+    checknewbox(box)
+    if GameObj.right_hand and GameObj.right_hand.noun == box.noun
+      other_hand = GameObj.left_hand
+    else
+      other_hand = GameObj.right_hand
+    end
+
+    tool = nil
+    container_id = nil
+    if args
+      tool, container_id = find_item_anywhere(args)
+      unless tool
+        echo tool_not_found_message
+        return
+      end
+      if container_id and other_hand.id
+        unless can_store_tool
+          echo "Your hands appear to be full."
+          return
+        end
+      end
+    else
+      tool = other_hand
+      unless tool.id
+        echo empty_hands_message
+        return
+      end
+    end
+    waitrt?
+    unless tool.id == other_hand.id
+      store_tool
+      fput "get ##{tool.id}"
+      wait_until{GameObj.right_hand.id == tool.id or GameObj.left_hand.id == tool.id}
+    end
+    if container_id
+      $_box_script_status[:lasttool] = tool.id
+      $_box_script_status[:lastcontainer] = container_id
+    end
+    substitutions = { '$B' => "##{box.id}", '$L' => "##{tool.id}", '$T' => "##{tool.id}" }
+    command = template.gsub(/\$[BLT]/i, substitutions)
+    if block_given? and window_allowed?
+      yield box, tool
+    end
+    fput command
+  end
+
+  def unlock_command(args)
+    tool_command(
+        args,
+        CharSettings['lockpick_command'],
+        'I could not find that lockpick.',
+        'You don\'t appear to holding a lockpick.'
+    ){|box,tool|
+      start_capture(
+          "attempt (d100=", RingBuffer.new(2), "\n[Using your #{tool.name}]\n"
+      )
+    }
+  end
+
+  def measure_command(args)
+    tool_command(
+        CharSettings['calipers'],
+        'lmas measure $B',
+        'I could not find your calipers.',
+        'You don\'t appear to holding calipers.'
+    ){|box,tool|
+      starttrigger = "Using your <a exist=\"#{tool.id}\""
+      stage = 0
+      buffer = nil
+      timeout = Time::now + 60
+
+      DownstreamHook.add('box_capture_script', proc{|line|
+        DownstreamHook.remove('box_capture_script') if Time::now > timeout
+        case stage
+          when 0
+            if line.include?(starttrigger)
+              stage = 1
+              buffer = ["\n", line]
+            end
+          when 1
+            if line.include?('<prompt')
+              write_window(buffer)
+              line += condense
+              buffer = nil
+              stage = 2
+            else
+              buffer.push(line)
+            end
+          when 2
+            if line.start_with?('Measuring carefully, ')
+              write_window(line)
+              line += condense
+              DownstreamHook.remove('box_capture_script')
+            end
+          else nil
+        end
+        line
+      })
+    }
+  end
+
+  def calibrate_command(args)
+    tool_command(
+        CharSettings['calipers'],
+        'lmas calibrate $T',
+        'I could not find your calipers.',
+        'You don\'t appear to holding calipers.'
+    ){|box,tool|
+      start_capture("You make some effort to fine-tune the <a exist=\"#{tool.id}\"")
+    }
+  end
+
+  def scan_command(args = nil)
+    wanted_downstream = @script.want_downstream
+    wanted_downstream_xml = @script.want_downstream_xml
+    @script.want_downstream_xml = true
+    fput 'inv containers'
+    xml = waitfor 'You are wearing'
+    @script.want_downstream = wanted_downstream
+    @script.want_downstream_xml = wanted_downstream_xml
+
+    # pattern = /<a exist="(\d+)"/g
+
+    xml.scan(/(?:<a exist="(\d+)")+/).each{|match|
+      exist = match[0]
+      # next if GameObj.containers.include?(exist)
+      fput "look in ##{exist}"
+      loop {
+        line = get
+        if line =~ /(In .* you see)|(There is nothing in there\.)|(That is closed.)|(Peering into the )/
+          break
+        end
+      }
+    }
+  end
+
+  def lootsack_command(args = nil)
+    if args
+      UserVars.lootsack = args
+      echo "Your lootsack is now '#{args}'"
+      return
+    else
+      if UserVars.lootsack
+        echo "Your current lootsack is '#{UserVars.lootsack}'"
+      else
+        echo "No lootsack is configured."
+      end
+    end
+    # if UserVars.lootsack
+    #   echo resolve_containers(UserVars.lootsack).inspect
+    # end
+    echo "You can change this with #{$lich_char}#{@script.name} LOOTSACK <container>"
+  end
+
+  def find_item_anywhere(name)
+    # Returns item, container_id.  container_id is nil if item is held.
+    words = text_to_words(name)
+    item = find_matching_item([GameObj.right_hand, GameObj.left_hand], words)
+    return item, nil if item
+    for container, items in GameObj.containers
+      item = find_matching_item(items, words)
+      return item, container if item
+    end
+    return nil, nil
+  end
+
+  def find_calipers
+    find_item_anywhere(CharSettings['calipers'])
+  end
+
+  def calipers_command(args = nil)
+    if args
+      CharSettings['calipers'] = args
+      echo "Your calipers are now '#{args}'"
+    else
+      echo "Your current calipers are '#{CharSettings['calipers']}'"
+    end
+    calipers, container = find_calipers
+    if calipers
+      echo "Found '#{calipers.before_name} #{calipers.name}' (##{calipers.id})"
+    else
+      echo "WARNING: Could not find any calipers by that description."
+    end
+  end
+
+  # def picksack_command(args = nil)
+  #   if args
+  #     CharSettings['picksack'] = args
+  #     respond "Your picksack is now '#{args}'"
+  #     return
+  #   else
+  #     if CharSettings['picksack']
+  #       respond "Your current picksack is '#{CharSettings['picksack']}'"
+  #     else
+  #       respond "No picksack is configured."
+  #     end
+  #   end
+  #   respond "You can change this with #{$lich_char}#{@script.name} PICKSACK <container>"
+  # end
+  #
+  def run(vars)
+    cmd, *args = vars[1..-1]
+    if args
+      args = args.join(' ')
+    end
+    if args == ''
+      args = nil
+    end
+
+    unless cmd
+      echo "No subcommand specified, showing help"
+      help_command
+      exit
+    end
+
+    case cmd
+      when "help"
+        help_command(args)
+      when "list"
+        list_command(args)
+      when "grab"
+        grab_command(args)
+      when "accept"
+        accept_command(args)
+      when "return"
+        return_command(args)
+      when "next"
+        next_command(args)
+      when "drop"
+        drop_command(args)
+      when "disarm"
+        disarm_detect_command(args, "disarm")
+      when "detect"
+        disarm_detect_command(args, "detect")
+      when "unlock", "pick", "lockpick"
+        unlock_command(args)
+      when "empty"
+        empty_command(args)
+      when "status"
+        status_command(args)
+      when "scan"
+        scan_command(args)
+      when "command"
+        command_command(args)
+      when "lootsack"
+        lootsack_command(args)
+      when "calipers"
+        calipers_command(args)
+      when "measure", "meas"
+        measure_command(args)
+      when "calibrate", "cal"
+        calibrate_command(args)
+      when "window"
+        window_command(args)
+      # when "picksack"
+      #   picksack_command(args)
+      when "debug"
+        echo $_box_script_status.inspect
+        echo CharSettings.to_hash.inspect
+      else
+        echo "Unknown subcommand.  See #{$lich_char}#{@script.name} help."
+    end
+  end
+
+  def empty_command(args = nil)
+    store_tool
+    box = find_held_box
+    unless box
+      echo "You don't appear to have a box in your hands."
+      return
+    end
+
+    unless args
+      args = UserVars.lootsack
+    end
+    if args.downcase.start_with?("my ")
+      args = args[3..-1]
+    end
+
+    waitrt?
+    fput "open ##{box.id}" if box.contents == nil
+    fput "look in ##{box.id}"
+    fput "get coins from ##{box.id}"
+    waitrt?
+    fput "empty ##{box.id} into #{args}"
+    waitrt?
+  end
+
+  def create_window
+    return unless window_allowed?
+    return if $_box_script_status[:windowcreated]
+    window = REXML::Element.new('streamWindow')
+    window.attributes['id'] = 'boxresults'
+    window.attributes['title'] = 'Lockpicking'
+    window.attributes['ifclosed'] = ''
+    window.attributes['scroll'] = 'auto'
+    window.attributes['resident'] = 'true'
+    window.attributes['save'] = 'save' if @window_option == 'save' else ''
+    @buffer << window.to_s
+    $_box_script_status[:windowcreated] = true
+    expose_window
+  end
+
+  def expose_window
+    return unless window_allowed?
+    create_window
+    @buffer << '<exposeStream id="boxresults" />'
+  end
+
+  def write_window(contents, expose=true)
+    return unless window_allowed?
+    create_window
+    contents = contents.join('') if contents.is_a?(Array)
+    output = []
+    output.push("<pushStream id=\"boxresults\" />\n")
+    output.push(contents)
+    output.push("<popStream />\n")
+    @buffer << output.join('')
+  end
+
+  def strip_most_xml(xml)
+    # Keeps <a>
+    xml.gsub(/<(?!(?:a )|(?:\/a)).*?>/, '')
+  end
+
+  def start_capture(trigger, buffer=nil, intro="\n", timeout=60)
+    # Starts capture when trigger_start happens, and outputs the `context` lines before it.
+    # Ends capture when trigger_end happens, and possibly includes that capture in the output
+    # Abort if more than a certain amount of time passes to avoid breakage.
+    return unless window_allowed?
+    output = nil
+
+    timeout = Time::now + timeout
+    create_window
+
+    DownstreamHook.add('box_capture_script', proc{|line|
+      DownstreamHook.remove('box_capture_script') if Time::now > timeout
+      if line.strip.length > 0
+        if output
+          if line.include?('<prompt')
+            DownstreamHook.remove('box_capture_script')
+            write_window(output, false)
+            line += condense
+          else
+            output.push(strip_most_xml(line))
+          end
+        else
+          if line.include?(trigger)
+            output = [intro]
+            output += buffer.to_a.map{|line| strip_most_xml(line)} if buffer
+            buffer = nil
+            output.push(strip_most_xml(line))
+          elsif buffer
+            buffer.push(line)
+          end
+        end
+      end
+      line
+    })
+  end
+
+  def escape_xml(text)
+    escape = { '<' => '&lt;', '>' => '&gt;', '"' => '&quot;', "'" => "&apos;", '&' => '&amp;' }
+    return text.gsub(/([<>"'&])/) { escape[$1] }
+  end
+
+  def writelink(before, item, after = nil)
+    text = "#{item.before_name} #{item.name} #{item.after_name}".strip
+    unless $frontend == 'stormfront'
+      respond "#{before}#{text}#{after}"
+    end
+    puts "#{escape_xml(before)}<a exist=\"#{item.id}\" noun=\"#{item.noun}\">#{escape_xml(text)}</a>#{after}"
+  end
+end
+
+BoxScript.new(script).run(script.vars)

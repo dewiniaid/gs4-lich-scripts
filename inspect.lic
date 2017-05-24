@@ -1,0 +1,147 @@
+=begin
+  Inspects an item, captures the resulting messaging, and adds more detailed information to it.
+  Currently this shows numerical capacities of containers and armor subgroup names on (most) armor.
+
+  Hint:   ;alias add inspect=;inspect
+
+  If trusted, ;inspect will hide echoing the real INSPECT sent to the game to cut down on unneeded screen spam.
+  Trusting this script is entirely optional, and has no other effects on behavior.
+
+	  author: LostRanger (thisgenericname@gmail.com)
+	  game: GemStone
+	  tags: inspect
+	  required: Lich >= 4.6.0
+
+  version: 0.1 (2017-05-07)
+  changelog:
+    version 0.1 (2017-05-27)
+      * initial release
+=end
+
+@script.want_downstream = false
+@script.want_downstream_xml = true
+
+WEIGHTS = {
+  'very small' => '0-4',
+  'small' => '5-7',
+  'fairly small' => '8-11',
+  'somewhat small' => '12-15',
+  'slightly small' => '16-19',
+  'medium' => '20-39',
+  'slightly large' => '40-49',
+  'fairly large' => '50-59',
+  'large' => '60-69',
+  'particularly large' => '70-79',
+  'very large' => '80-99',
+  'significant' => '100-119',
+  'exceptional' => '120-139',
+  'huge' => '140-159',
+  'incredible' => '160-179',
+  'enormous' => '180-199',
+  'gigantic' => '200+'
+}
+WEIGHT_PATTERN = /an? (\w+(?: \w+)?) amount/
+
+COUNTS = {
+  'one' =>	'1',
+  'a couple'	=> '2',
+  'a few'	=> '3',
+  'several'	=> '4-6',
+  'a number'	=> '7-9',
+  'any number'	=> '10+'
+}
+
+COUNT_PATTERN = /(with enough space for (.*?)) ((?:of )?items?)/
+# test = 'You estimate that an <a exist="67092844" noun="box">enruned steel box</a> can store a particularly large amount with enough space for a number of items.'
+#
+# test.gsub!(WEIGHT_PATTERN){|match| "#{match} (#{WEIGHTS[$1]} lbs)" }
+# test.gsub!(COUNT_PATTERN){|match|
+#   echo $~.inspect
+#   echo $1.inspect
+#   echo match.inspect
+#   "#{$1} (#{COUNTS[$2]}) #{$3}" }
+# echo test
+
+ARMOR_PATTERN = /(.*allows you to conclude that it is (.*?) armor that covers the (.*?)\.)(.*)/
+
+ARMOR_GROUPS = {
+    'cloth' => 0,
+    'soft leather' => 1,
+    'rigid leather' => 2,
+    'chain' => 3,
+    'plate' => 4
+}
+
+ASG_BITS = {
+    1 => 1,
+    3 => 2,
+    7 => 3,
+    31 => 4
+}
+
+ASG_TABLE = {
+    1 => 'Normal Clothing',
+    2 => 'Robes',
+    5 => 'Light Leather',
+    6 => 'Full Leather',
+    7 => 'Reinforced Leather',
+    8 => 'Double Leather',
+    9 => 'Leather Breastplate',
+    10 => 'Cuirbouilli Leather',
+    11 => 'Studded Leather',
+    12 => 'Brigandine Armor',
+    13 => 'Chain Mail',
+    14 => 'Double Mail',
+    15 => 'Augmented Chain',
+    16 => 'Chain Hauberk',
+    17 => 'Metal Breastplate',
+    18 => 'Augmented Plate',
+    19 => 'Half Plate',
+    20 => 'Full Plate'
+}
+
+silence_me if $SAFE == 0# Trusting this script will prevent it from sending INSPECT, optional.
+
+before_dying{
+  DownstreamHook.remove("inspect_modify_hook")
+}
+
+wait_for_exit = Queue.new  # Probably a better construct for this, but this works for now
+
+DownstreamHook.add("inspect_modify_hook", proc{|data|
+  data = (
+    data
+    .gsub(WEIGHT_PATTERN){|match| "#{match} (#{WEIGHTS[$1]} lbs)" }
+    .gsub(COUNT_PATTERN){|match| "#{$1} (#{COUNTS[$2]}) #{$3}" }
+  )
+  if data =~ ARMOR_PATTERN
+    before = $1
+    after = $4
+    group = ARMOR_GROUPS[$2]
+    next data unless group
+
+    coverage = $3.downcase.split(/(?:,| and | )+/)
+    bits = 0
+    bits += 1 if coverage.include?('torso')
+    bits += 2 if coverage.include?('arms')
+    bits += 4 if coverage.include?('legs')
+    bits += 8 if coverage.include?('neck')
+    bits += 16 if coverage.include?('head')
+    subgroup = ASG_BITS[bits]
+    next data if subgroup.nil?
+    if group == 0
+      return data unless subgroup == 1
+      subgroup = 2
+    else
+      subgroup += 4*group
+    end
+    data = "#{before}  (ASG #{subgroup}: #{ASG_TABLE[subgroup]})  #{after}\n"
+  end
+  wait_for_exit.push(nil) if data.include?('</prompt>')
+  data
+})
+
+waitrt?
+fput "inspect #{script.vars[0]}"
+wait_for_exit.pop
+DownstreamHook.remove("inspect_modify_hook")
