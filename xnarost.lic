@@ -1,15 +1,37 @@
 =begin
+  xNarost - Lost Ranger's eXperimental Narost branch.
 
 	Tracks your current room on Tsoran (or other) maps
+
+  Key differences between this and ;narost:
+    * xnarost has a better-organized map list with submenus, and uses 'proper' map names instead of filenames.
+    * xnarost sorts the list of tags.
+    * xnarost supports CTRL+Mousewheel zooming.
 
 	click on a room to go there
 	shift-click on a room to show its description
 	right-click for some options
 
-	author: Tillmen (tillmen@lichproject.org)
-	game: any
+  author: LostRanger (thisgenericname@gmail.com)
+	original Narost author: Tillmen (tillmen@lichproject.org)
+
+	game: Gemstone
 	tags: core, movement
 
+  version: 0.3 (2017-05-26) based on narost.lic from 2014-08-24
+
+  changelog:
+    version 0.3 (2017-05-26)
+     * Added most of the rest of the map metadata.  Remove the "This is experimental!" nag-message.
+     * Sort the list of tags.
+     * Make tag and map sorting case-insensitive.
+     * Maps can now be zoomed with CTRL+Mousewheel.
+
+    version 0.2 (2017-05-25)
+     * Complete more map data.
+
+    version 0.1 (2017-05-25) based on narost.lic from 2014-08-24
+     * Improve map list organization.
 =end
 
 # fixme: click arrow to next map to show map
@@ -36,6 +58,273 @@ if $SAFE > 0
 	exit
 end
 
+# echo <<EOF
+#
+# * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+# This is an EXPERIMENTAL update to Narost, and it does not yet have completely updated data.
+#
+# You can help crowdsource the data entry at the below link:
+# https://docs.google.com/spreadsheets/d/1oGk-4XZL0196aMGPUQFtDpvo_LPxJI3sx40tRKw7uoY/edit#gid=0
+#
+# This nag message will be removed when the data collection is complete and the script is updated.
+# See also ;repo set-updatable xnarost.lic
+# * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+# EOF
+
+
+class MapData
+  # Source for data: https://docs.google.com/spreadsheets/d/1oGk-4XZL0196aMGPUQFtDpvo_LPxJI3sx40tRKw7uoY/edit#gid=0
+  Data = {
+      'adventurers_guild' => {:name => 'Adventurer\'s Guild', :shortname => 'Adventurer\'s Guild', :categories => ['Guilds', 'Wehnimer\'s Landing', 'Icemule Trace', 'Vornavis', 'River\'s Rest', 'Isle of the Four Winds', 'Teras Isle', 'Zul Logoth', 'Elven Nations']},
+      'confluence' => {:name => 'Elemental Confluence, The', :shortname => 'Elemental Confluence', :categories => ['Other']},
+      'ebonstone_manor' => {:name => 'Wehnimer\'s Landing - Ebonstone Manor', :shortname => 'Ebonstone Manor', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'en-aradhul-road' => {:name => 'Elven Nations - Aradhul Road', :shortname => 'Aradhul Road', :categories => ['Elven Nations']},
+      'en-cemetery' => {:name => 'Elven Nations - Ta\'Vaalor Cemetary and Neartofar Forest', :shortname => 'Cemetary/Neartofar Forest', :categories => ['Elven Nations']},
+      'en-cleric_guild' => {:name => 'Elven Nations - Ta\'Illistim Cleric Guild', :shortname => 'Cleric Guild (Ta\'Illistim)', :categories => ['Elven Nations', 'Guilds']},
+      'en-cysaegir' => {:name => 'Elven Nations - Cysaegir', :shortname => 'Cysaegir', :categories => ['Elven Nations', 'Towns']},
+      'en-fearling' => {:name => 'Elven Nations - Fearling Pass', :shortname => 'Fearling Pass', :categories => ['Elven Nations']},
+      'en-gyldemar' => {:name => 'Elven Nations - Gyldemar', :shortname => 'Gyldemar', :categories => ['Elven Nations']},
+      'en-illistim_rogue_guild' => {:name => 'Elven Nations - Ta\'Illistim Rogue Guild', :shortname => 'Rogue Guild (Ta\'Illistim)', :categories => ['Elven Nations', 'Guilds']},
+      'en-old_ta_faendryl' => {:name => 'Elven Nations - Old Ta\'Faendryl', :shortname => 'Old Ta\'Faendryl', :categories => ['Elven Nations']},
+      'en-ravelin' => {:name => 'Elven Nations - Ravelin', :shortname => 'Ravelin', :categories => ['Elven Nations']},
+      'en-sapphire' => {:name => 'Elven Nations - Ta\'Illistim Sapphire Gate', :shortname => 'Sapphire Gate/Whistler\'s Pass North', :categories => ['Elven Nations']},
+      'en-skull' => {:name => 'Elven Nations - Skull Temple', :shortname => 'Skull Temple', :categories => ['Elven Nations']},
+      'en-sylvarraend' => {:name => 'Elven Nations - Sylvarraend Road', :shortname => 'Sylvarraend Road', :categories => ['Elven Nations', 'Towns']},
+      'en-ta_illistim-embassies' => {:name => 'Elven Nations - Ta\'Illistim Embassies', :shortname => 'Ta\'Illistim Embassies', :categories => ['Elven Nations']},
+      'en-ta_illistim-isharn_enclave' => {:name => 'Elven Nations - Ta\'Illistim - Isharn Enclave', :shortname => 'Isharn Enclave', :categories => ['Elven Nations', 'MHO']},
+      'en-ta_illistim-new' => {:name => 'Elven Nations - Ta\'Illistim', :shortname => 'Ta\'Illistim', :categories => ['Elven Nations', 'Towns']},
+      'en-ta_illistim-rangerguild-v2' => {:name => 'Elven Nations - Ta\'Illistim Ranger Guild', :shortname => 'Ranger Guild (Ta\'Illistim)', :categories => ['Elven Nations', 'Guilds']},
+      'en-ta_illistim-sorcerer_guild' => {:name => 'Elven Nations - Ta\'Illistim Sorcerer Guild', :shortname => 'Sorcerer Guild (Ta\'Illistim)', :categories => ['Elven Nations', 'Guilds']},
+      'en-ta_illistim-wizard_guild' => {:name => 'Elven Nations - Ta\'Illistim Wizard Guild', :shortname => 'Wizard Guild (Ta\'Illistim)', :categories => ['Elven Nations', 'Guilds']},
+      'en-ta_illistim_buildings' => {:name => 'Elven Nations - Ta\'Illistim Buildings', :shortname => 'Ta\'Illistim Buildings', :categories => ['Elven Nations']},
+      'en-ta_vaalor' => {:name => 'Elven Nations - Ta\'Vaalor', :shortname => 'Ta\'Vaalor', :categories => ['Elven Nations', 'Towns']},
+      'en-ta_vaalor-dancing_dahcre' => {:name => 'Elven Nations - Ta\'Vaalor - Dancing Dahcre', :shortname => 'Ta\'Vaalor - Dancing Dahcre (Annex)', :categories => ['Elven Nations', 'CHE']},
+      'en-ta_vaalor-sorcerer_guild' => {:name => 'Elven Nations - Ta\'Vaalor Sorcerer Guild', :shortname => 'Sorcerer Guild (Ta\'Vaalor)', :categories => ['Elven Nations', 'Guilds']},
+      'en-ta_vaalor-wyverns_keep' => {:name => 'Elven Nations - Ta\'Vaalor - Wyvern Keep', :shortname => 'Ta\'Vaalor - Wyvern Keep', :categories => ['Elven Nations']},
+      'en-tower' => {:name => 'Elven Nations - Maaghara Tower', :shortname => 'Maaghara Tower', :categories => ['Elven Nations']},
+      'en-trail' => {:name => 'Elven Nations - Trail (Locksmehr River/West of Dragonspine)', :shortname => 'Locksmehr River Trail', :categories => ['Elven Nations', 'Wehnimer\'s Landing']},
+      'en-vaalor-rogue-guild' => {:name => 'Elven Nations - Ta\'Vaalor Rogue Guild', :shortname => 'Rogue Guild (Ta\'Vaalor)', :categories => ['Elven Nations', 'Guilds']},
+      'en-victory' => {:name => 'Elven Nations - Victory Road', :shortname => 'Victory Road', :categories => ['Elven Nations']},
+      'en-vo-homes' => {:name => 'Neighborhood of Elven Nations and Solhaven', :shortname => 'Neighborhood of Elven Nations and Solhaven', :categories => ['Elven Nations', 'Vornavis', 'Neighborhoods', 'Premium']},
+      'en-whistlers_pass' => {:name => 'Elven Nations - Whistler\'s Pass', :shortname => 'Whistler\'s Pass', :categories => ['Elven Nations']},
+      'en-zul-sorcerer_guild' => {:name => 'Zul Logoth - Sorcerer Guild', :shortname => 'Sorcerer Guild (Zul Logoth)', :categories => ['Zul Logoth', 'Guilds']},
+      'en-zul-wizard_guild' => {:name => 'Zul Logoth - Wizard Guild', :shortname => 'Wizard Guild (Zul Logoth)', :categories => ['Zul Logoth', 'Guilds']},
+      'en-zul_logoth' => {:name => 'Zul Logoth - Town Map', :shortname => 'Zul Logoth', :categories => ['Zul Logoth', 'Towns']},
+      'en-zul_logoth-rangerguild-v2' => {:name => 'Zul Logoth - Ranger Guild', :shortname => 'Ranger Guild (Zul Logoth)', :categories => ['Zul Logoth', 'Guilds']},
+      'fest-albatross' => {:name => 'fest-albatross', :shortname => 'fest-albatross', :categories => ['Events and Festivals']},
+      'fest-duskruin' => {:name => 'fest-duskruin', :shortname => 'fest-duskruin', :categories => ['Events and Festivals']},
+      'fest-ebon_gate' => {:name => 'fest-ebon_gate', :shortname => 'fest-ebon_gate', :categories => ['Events and Festivals']},
+      'fest-festival_of_the_fallen' => {:name => 'fest-festival_of_the_fallen', :shortname => 'fest-festival_of_the_fallen', :categories => ['Events and Festivals']},
+      'fest-highman_games' => {:name => 'fest-highman_games', :shortname => 'fest-highman_games', :categories => ['Events and Festivals']},
+      'fest-lumnea' => {:name => 'fest-lumnea', :shortname => 'fest-lumnea', :categories => ['Events and Festivals']},
+      'fest-midsummers-night' => {:name => 'fest-midsummers-night', :shortname => 'fest-midsummers-night', :categories => ['Events and Festivals']},
+      'fest-picklefest' => {:name => 'fest-picklefest', :shortname => 'fest-picklefest', :categories => ['Events and Festivals']},
+      'fest-spitfire' => {:name => 'fest-spitfire', :shortname => 'fest-spitfire', :categories => ['Events and Festivals']},
+      'ifw-cleric_guild' => {:name => 'Isle of the Four Winds - Cleric Guild', :shortname => 'Cleric Guild (FWI)', :categories => ['Isle of the Four Winds', 'Guilds', 'Premium']},
+      'ifw-eastern_waterway' => {:name => 'Isle of the Four Winds - Eastern Waterway', :shortname => 'Eastern Waterway', :categories => ['Isle of the Four Winds', 'Premium']},
+      'ifw-empath_guild' => {:name => 'Isle of the Four Winds - Empath Guild', :shortname => 'Empath Guild (FWI)', :categories => ['Isle of the Four Winds', 'Guilds', 'Premium']},
+      'ifw-isle_of_four_winds' => {:name => 'Isle of the Four Winds - Mist Harbor', :shortname => 'Mist Harbor', :categories => ['Isle of the Four Winds', 'Towns', 'Premium']},
+      'ifw-rogue_guild' => {:name => 'Isle of the Four Winds - Rogue Guild', :shortname => 'Rogue Guild (FWI)', :categories => ['Isle of the Four Winds', 'Guilds', 'Premium']},
+      'ifw-saewehna_lagoon' => {:name => 'Four Winds - Monsoon Lagoon', :shortname => 'Monsoon Lagoon', :categories => ['Isle of the Four Winds', 'Premium']},
+      'ifw-warrior guild' => {:name => 'Four Winds - Warrior Guild', :shortname => 'Warrior Guild (IFW)', :categories => ['Isle of the Four Winds', 'Guilds', 'Premium']},
+      'ifw-wilds' => {:name => 'Isle of the Four Winds - Wilds', :shortname => 'Wilds', :categories => ['Isle of the Four Winds', 'Premium']},
+      'imt-bramble_patch' => {:name => 'Icemule Trace - Bramble Patch', :shortname => 'Bramble Patch', :categories => ['Icemule Trace']},
+      'imt-cleric_guild' => {:name => 'Icemule Trace - Cleric Guild', :shortname => 'Cleric Guild (Icemule)', :categories => ['Icemule Trace', 'Guilds']},
+      'imt-clovertooth_hall' => {:name => 'Icemule Trace - Clovertooth Hall', :shortname => 'Clovertooth Hall', :categories => ['Icemule Trace']},
+      'imt-east_west_north_gates' => {:name => 'Icemule Trace - East, West and North Gates', :shortname => 'East, West and North Gates', :categories => ['Icemule Trace']},
+      'imt-empath_guild' => {:name => 'Icemule Trace - Empath Guild', :shortname => 'Empath Guild (Icemule)', :categories => ['Icemule Trace', 'Guilds']},
+      'imt-homes' => {:name => 'Neighborhoods of Icemule Trace and Pinefar', :shortname => 'Neighborhoods of Icemule Trace and Pinefar', :categories => ['Icemule Trace', 'Neighborhoods', 'Premium']},
+      'imt-icemule' => {:name => 'Icemule Trace', :shortname => 'Icemule Trace', :categories => ['Icemule Trace', 'Towns']},
+      'imt-pinefar' => {:name => 'Icemule Trace - Pinefar', :shortname => 'Pinefar', :categories => ['Icemule Trace', 'Towns']},
+      'imt-rangerguild-v2' => {:name => 'Icemule Trace - Ranger Guild', :shortname => 'Ranger Guild (Icemule)', :categories => ['Icemule Trace', 'Guilds']},
+      'imt-reim' => {:name => 'Icemule Trace - The Settlement of Reim', :shortname => 'The Settlement of Reim', :categories => ['Icemule Trace']},
+      'imt-rift' => {:name => 'Icemule Trace - Rift, The', :shortname => 'Rift, The', :categories => ['Icemule Trace']},
+      'imt-rogue_guild' => {:name => 'Icemule Trace - Rogue Guild', :shortname => 'Rogue Guild (Icemule)', :categories => ['Icemule Trace', 'Guilds']},
+      'imt-scatter' => {:name => 'Icemule Trace - Scatter, The', :shortname => 'Scatter, The', :categories => ['Icemule Trace']},
+      'imt-silvermule_gaming_hall' => {:name => 'Icemule Trace - Silvermule Gaming Hall', :shortname => 'Silvermule Gaming Hall', :categories => ['Icemule Trace']},
+      'imt-sorcerer_guild' => {:name => 'Icemule Trace - Sorcerer Guild', :shortname => 'Sorcerer Guild (Icemule)', :categories => ['Icemule Trace', 'Guilds']},
+      'imt-south_gate' => {:name => 'Icemule Trace - South Gate Wilds', :shortname => 'South Gate Wilds', :categories => ['Icemule Trace']},
+      'imt-trail' => {:name => 'Icemule Trace - Trail to Wehnimer\'s Landing', :shortname => 'Trail between Wehnimer\'s Landing and Icemule', :categories => ['Icemule Trace', 'Wehnimer\'s Landing']},
+      'imt-underground' => {:name => 'Icemule Trace - Underground', :shortname => 'Underground', :categories => ['Icemule Trace']},
+      'imt-whitehaven2' => {:name => 'Icemule Trace - House White Haven (Map #1)', :shortname => 'House White Haven (Map #1)', :categories => ['Icemule Trace', 'CHE']},
+      'imt-white_haven' => {:name => 'Icemule Trace - House White Haven (Map #2)', :shortname => 'House White Haven (Map #2)', :categories => ['Icemule Trace', 'CHE']},
+      'imt-wizard_guild' => {:name => 'Icemule Trace - Wizard Guild', :shortname => 'Wizard Guild (Icemule)', :categories => ['Icemule Trace', 'Guilds']},
+      'premium_halls' => {:name => 'Premium Halls of Elanthia', :shortname => 'Premium Halls of Elanthia', :categories => ['Premium', 'Elven Nations', 'Wehnimer\'s Landing', 'Zul Logoth', 'River\'s Rest', 'Icemule Trace', 'Solhaven', 'Teras Isle']},
+      'red_forest' => {:name => 'Red Forest, The', :shortname => 'Red Forest', :categories => ['Wehnimer\'s Landing', 'Elven Nations']},
+      'rr-beacon_hall' => {:name => 'River\'s Rest - Beacon Hall Archive', :shortname => 'Beacon Hall Archive', :categories => ['River\'s Rest', 'CHE']},
+      'rr-citadel' => {:name => 'River\'s Rest - Citadel', :shortname => 'Citadel', :categories => ['River\'s Rest']},
+      'rr-maelstrom' => {:name => 'River\'s Rest - Maelstrom Bay', :shortname => 'Maelstrom Bay', :categories => ['River\'s Rest']},
+      'rr-marsh_keep' => {:name => 'River\'s Rest - Marsh Keep', :shortname => 'Marsh Keep', :categories => ['River\'s Rest']},
+      'rr-rivers_rest' => {:name => 'River\'s Rest', :shortname => 'River\'s Rest', :categories => ['River\'s Rest', 'Towns']},
+      'rr-rogue_guild' => {:name => 'River\'s Rest - Rogue Guild', :shortname => 'Rogue Guild (River\'s Rest)', :categories => ['River\'s Rest', 'Guilds']},
+      'rr-sorcerer_guild' => {:name => 'River\'s Rest - Sorcerer Guild', :shortname => 'Sorcerer Guild (River\'s Rest)', :categories => ['River\'s Rest', 'Guilds']},
+      'rr-warrens' => {:name => 'River\'s Rest - Warrens', :shortname => 'Warrens', :categories => ['River\'s Rest']},
+      'rr-wizard_guild' => {:name => 'River\'s Rest - Wizard Guild', :shortname => 'Wizard Guild (River\'s Rest)', :categories => ['River\'s Rest', 'Guilds']},
+      'sanctum' => {:name => 'Sanctum of Scales', :shortname => 'Sanctum of Scales', :categories => ['Other']},
+      'spire_grounds_5117' => {:name => 'Summit Academy and Sylinar\'s Spire', :shortname => 'Summit Academy and Sylinar\'s Spire', :categories => ['Other']},
+      'ti-adventurers_rest' => {:name => 'Teras Isle - Adventurer\'s Rest', :shortname => 'Adventurer\'s Rest', :categories => ['Teras Isle']},
+      'ti-cleric_guild' => {:name => 'Teras Isle - Cleric Guild', :shortname => 'Cleric Guild (Teras)', :categories => ['Teras Isle', 'Guilds']},
+      'ti-nelemar' => {:name => 'Teras Isle - Nelemar', :shortname => 'Nelemar', :categories => ['Teras Isle']},
+      'ti-rogue_guild' => {:name => 'Teras Isle - Rogue Guild', :shortname => 'Rogue Guild (Teras)', :categories => ['Teras Isle', 'Guilds']},
+      'ti-rr-homes' => {:name => 'Neighborhoods of Teras Isle and River\'s Rest', :shortname => 'Neighborhoods of Teras Isle and River\'s Rest', :categories => ['Teras Isle', 'River\'s Rest', 'Neighborhoods', 'Premium']},
+      'ti-sorcerer_guild' => {:name => 'Teras Isle - Sorcerer Guild', :shortname => 'Sorcerer Guild (Teras)', :categories => ['Teras Isle', 'Guilds']},
+      'ti-teras' => {:name => 'Teras Isle - Kharam-Dzu', :shortname => 'Kharam-Dzu', :categories => ['Teras Isle', 'Towns']},
+      'ti-vtull' => {:name => 'Teras Isle - Eye of V\'Tull', :shortname => 'Eye of V\'Tull', :categories => ['Teras Isle']},
+      'ti-wilds' => {:name => 'Teras Isle - Fhorian Village', :shortname => 'Fhorian Village', :categories => ['Teras Isle']},
+      'ti-wizard_guild' => {:name => 'Teras Isle - Wizard Guild', :shortname => 'Wizard Guild (KD)', :categories => ['Teras Isle', 'Guilds']},
+      'vo-caravansary' => {:name => 'Vornavis - Caravansary', :shortname => 'Caravansary', :categories => ['Vornavis']},
+      'vo-cleric_guild' => {:name => 'Vornavis - Cleric Guild', :shortname => 'Cleric Guild (VO)', :categories => ['Vornavis', 'Guilds']},
+      'vo-foggy_valley' => {:name => 'Vornavis - Foggy Valley', :shortname => 'Foggy Valley', :categories => ['Vornavis']},
+      'vo-north_beach' => {:name => 'Vornavis - North Beach', :shortname => 'North Beach', :categories => ['Vornavis']},
+      'vo-outlands' => {:name => 'Vornavis - Outlands', :shortname => 'Outlands', :categories => ['Vornavis']},
+      'vo-rangerguild-v2' => {:name => 'Vornavis - Ranger Guild', :shortname => 'Ranger Guild (VO)', :categories => ['Vornavis', 'Guilds']},
+      'vo-rogue_guild' => {:name => 'Vornavis - Rogue Guild', :shortname => 'Rogue Guild (VO)', :categories => ['Vornavis', 'Guilds']},
+      'vo-solhaven' => {:name => 'Vornavis - Solhaven', :shortname => 'Solhaven', :categories => ['Vornavis', 'Towns']},
+      'vo-sorcerer_guild' => {:name => 'Vornavis - Sorcerer Guild', :shortname => 'Sorcerer Guild (VO)', :categories => ['Vornavis', 'Guilds']},
+      'vo-trail' => {:name => 'Trail to Vornavis', :shortname => 'Trail to Vornavis', :categories => ['Vornavis', 'Wehnimer\'s Landing']},
+      'vo-warehouse_lockers' => {:name => 'Vornavis - Solhaven Lockers', :shortname => 'Solhaven Lockers', :categories => ['Vornavis']},
+      'warcamp' => {:name => 'Grimswarm Warcamp', :shortname => 'Grimswarm Warcamp', :categories => ['Other']},
+      'warrior_guilds' => {:name => 'Warrior Guilds', :shortname => 'Warrior Guilds', :categories => ['Guilds', 'Elven Nations', 'Icemule Trace', 'Vornavis', 'Wehnimer\'s Landing', 'River\'s Rest', 'Teras Isle']},
+      'wl-beacon_hall' => {:name => 'Wehnimer\'s Landing - Beacon Hall Annex', :shortname => 'Beacon Hall Annex', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-black_wolves_manor' => {:name => 'Wehnimer\'s Landing - Black Wolves', :shortname => 'Black Wolves', :categories => ['Wehnimer\'s Landing', 'MHO']},
+      'wl-brigatta' => {:name => 'Wehnimer\'s Landing - House Brigatta (Map 1)', :shortname => 'House Brigatta (Map 1)', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-broken' => {:name => 'Wehnimer\'s Landing - Broken Lands', :shortname => 'Broken Lands', :categories => ['Wehnimer\'s Landing']},
+      'wl-burrow_way' => {:name => 'Wehnimer\'s Landing - Burrow Way', :shortname => 'Burrow Way', :categories => ['Wehnimer\'s Landing']},
+      'wl-catacombs' => {:name => 'Wehnimer\'s Landing - Catacombs', :shortname => 'Catacombs', :categories => ['Wehnimer\'s Landing']},
+      'wl-cavernhold' => {:name => 'Wehnimer\'s Landing - Cavernhold', :shortname => 'Cavernhold', :categories => ['Wehnimer\'s Landing']},
+      'wl-cleric_guild' => {:name => 'Wehnimer\'s Landing - Cleric Guild', :shortname => 'Cleric Guild (Wehnimer\'s)', :categories => ['Wehnimer\'s Landing', 'Guilds']},
+      'wl-coastal_cliffs' => {:name => 'Wehnimer\'s Landing - Coastal Cliffs', :shortname => 'Coastal Cliffs', :categories => ['Wehnimer\'s Landing']},
+      'wl-danjirland' => {:name => 'Wehnimer\'s Landing - Danjirland', :shortname => 'Danjirland', :categories => ['Wehnimer\'s Landing']},
+      'wl-darkstone' => {:name => 'Wehnimer\'s Landing - Darkstone Castle', :shortname => 'Darkstone Castle', :categories => ['Wehnimer\'s Landing']},
+      'wl-deadfall' => {:name => 'Wehnimer\'s Landing - Deadfall Forest', :shortname => 'Deadfall Forest', :categories => ['Wehnimer\'s Landing']},
+      'wl-dyers_tent' => {:name => 'Wehnimer\'s Landing - Reignbeau Caverns (Dyer\'s Tent)', :shortname => 'Reignbeau Caverns (Dyer\'s Tent)', :categories => ['Wehnimer\'s Landing']},
+      'wl-empath_guild' => {:name => 'Wehnimer\'s Landing - Empath Guild', :shortname => 'Empath Guild (Wehnimer\'s)', :categories => ['Wehnimer\'s Landing', 'Guilds']},
+      'wl-faendryl-v2' => {:name => 'Wehnimer\'s Landing - Faendryl Enclave', :shortname => 'Faendryl Enclave', :categories => ['Wehnimer\'s Landing', 'MHO']},
+      'wl-gates' => {:name => 'Wehnimer\'s Landing - Outside Gates', :shortname => 'Outside Gates', :categories => ['Wehnimer\'s Landing']},
+      'wl-graveyard' => {:name => 'Wehnimer\'s Landing - Graveyard', :shortname => 'Graveyard', :categories => ['Wehnimer\'s Landing']},
+      'wl-halcyon_hills' => {:name => 'Wehnimer\'s Landing - Halcyon Hills', :shortname => 'Halcyon Hills', :categories => ['Wehnimer\'s Landing']},
+      'wl-hearthstone_manor' => {:name => 'Wehnimer\'s Landing - Hearthstone Manor', :shortname => 'Hearthstone Manor', :categories => ['Wehnimer\'s Landing']},
+      'wl-homes-1' => {:name => 'Neighborhoods of Wehnimer\'s Landing #1', :shortname => 'Neighborhoods of Wehnimer\'s Landing #1', :categories => ['Wehnimer\'s Landing', 'Neighborhoods', 'Premium']},
+      'wl-homes-2' => {:name => 'Neighborhoods of Wehnimer\'s Landing #2', :shortname => 'Neighborhoods of Wehnimer\'s Landing #2', :categories => ['Wehnimer\'s Landing', 'Neighborhoods', 'Premium']},
+      'wl-house_brigatta' => {:name => 'Wehnimer\'s Landing - House Brigatta (Map 2)', :shortname => 'House Brigatta (Map 2)', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-house_onoir' => {:name => 'Wehnimer\'s Landing - House Daingneach Onoir', :shortname => 'House Daingneach Onoir', :categories => ['Wehnimer\'s Landing', 'MHO']},
+      'wl-house_paupers' => {:name => 'Wehnimer\'s Landing - House Paupers', :shortname => 'House Paupers', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-house_phoenix' => {:name => 'Wehnimer\'s Landing - House Of The Rising Phoenix', :shortname => 'House Of The Rising Phoenix', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-house_sovyn' => {:name => 'Wehnimer\'s Landing - House Sovyn', :shortname => 'House Sovyn', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-lysierian' => {:name => 'Wehnimer\'s Landing - Lysierian Hills', :shortname => 'Lysierian Hills', :categories => ['Wehnimer\'s Landing']},
+      'wl-mineroad' => {:name => 'Wehnimer\'s Landing - Old Mine Road', :shortname => 'Old Mine Road', :categories => ['Wehnimer\'s Landing']},
+      'wl-moot_hall' => {:name => 'Wehnimer\'s Landing - Moot Hall', :shortname => 'Moot Hall', :categories => ['Wehnimer\'s Landing']},
+      'wl-museum' => {:name => 'Wehnimer\'s Landing - Museum', :shortname => 'Museum', :categories => ['Wehnimer\'s Landing']},
+      'wl-rangerguild-v1' => {:name => 'Wehnimer\'s Landing - Ranger Guild', :shortname => 'Ranger Guild (WL)', :categories => ['Wehnimer\'s Landing', 'Guilds']},
+      'wl-rogue_guild' => {:name => 'Wehnimer\'s Landing - Rogue Guild', :shortname => 'Rogue Guild (Wehnimer\'s)', :categories => ['Wehnimer\'s Landing', 'Guilds']},
+      'wl-silvergate_inn' => {:name => 'Wehnimer\'s Landing - Silvergate Inn', :shortname => 'Silvergate Inn', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-sorcerer_guild' => {:name => 'Wehnimer\'s Landing - Sorcerer Guild', :shortname => 'Sorcerer Guild (Wehnimer\'s)', :categories => ['Wehnimer\'s Landing', 'Guilds']},
+      'wl-spider_temple' => {:name => 'Wehnimer\'s Landing - Spider Temple', :shortname => 'Spider Temple', :categories => ['Wehnimer\'s Landing']},
+      'wl-stone_baths' => {:name => 'Wehnimer\'s Landing - Stone Baths', :shortname => 'Stone Baths', :categories => ['Wehnimer\'s Landing']},
+      'wl-stronghold' => {:name => 'Wehnimer\'s Landing - Stronghold and Thanatoph', :shortname => 'Stronghold/Thanatoph', :categories => ['Wehnimer\'s Landing']},
+      'wl-swale' => {:name => 'Wehnimer\'s Landing - Swale, The', :shortname => 'Swale, The', :categories => ['Wehnimer\'s Landing']},
+      'wl-sylvanfair' => {:name => 'Wehnimer\'s Landing - House Sylvanfair', :shortname => 'House Sylvanfair', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-talador' => {:name => 'Wehnimer\'s Landing - Talador Festival Grounds', :shortname => 'Talador Festival Grounds', :categories => ['Wehnimer\'s Landing']},
+      'wl-talador-east' => {:name => 'Wehnimer\'s Landing - Talador Hunting East', :shortname => 'Talador Hunting East', :categories => ['Wehnimer\'s Landing']},
+      'wl-talador-west' => {:name => 'Wehnimer\'s Landing - Talador Hunting West', :shortname => 'Talador Hunting West', :categories => ['Wehnimer\'s Landing']},
+      'wl-trollfang' => {:name => 'Wehnimer\'s Landing - Upper Trollfang', :shortname => 'Upper Trollfang', :categories => ['Wehnimer\'s Landing']},
+      'wl-twilight_hall' => {:name => 'Wehnimer\'s Landing - Twilight Hall', :shortname => 'Twilight Hall', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-wehnimers' => {:name => 'Wehnimer\'s Landing - Town Map', :shortname => 'Wehnimer\'s Landing', :categories => ['Wehnimer\'s Landing', 'Towns']},
+      'wl-wehntoph' => {:name => 'Wehnimer\'s Landing - Wehntoph', :shortname => 'Wehntoph', :categories => ['Wehnimer\'s Landing']},
+      'wl-willow_hall' => {:name => 'Wehnimer\'s Landing - Willow Hall', :shortname => 'Willow Hall', :categories => ['Wehnimer\'s Landing', 'CHE']},
+      'wl-wizard_guild' => {:name => 'Wehnimer\'s Landing - Wizard Guild', :shortname => 'Wizard Guild (Wehnimer\'s)', :categories => ['Wehnimer\'s Landing', 'Guilds']},
+  }
+  def MapData.normalize_filename(filename)
+    filename.gsub(/(-\d+)?\..+$/, '')
+  end
+  def MapData.[](key)
+    Data[MapData.normalize_filename(key)]
+  end
+  def MapData.[]=(key, value)
+    Data[MapData.normalize_filename(key)] = value
+  end
+
+  # Links from narost.  Migrated on startup because I'm too lazy to do it right.
+  [
+      [ 'TI-teras.gif',                  1962, 2238,   68,  192, 'TI-wilds.gif',                   840, 1252 ],
+      [ 'TI-teras.gif',                   710,  972, 2130, 2260, 'WL-wehnimers.gif',              2338, 1070 ],
+      [ 'TI-wilds.gif',                  1124, 1412,  604,  682, 'TI-vtull.gif',                  2276, 1638 ],
+      [ 'TI-wilds.gif',                   678, 1006, 1218, 1296, 'TI-teras.gif',                  2100,  130 ],
+      [ 'TI-wilds.gif',                  1190, 1390, 2750, 2878, 'TI-nelemar.gif',                2794, 1670 ],
+      [ 'TI-vtull.gif',                  2100, 2452, 1598, 1672, 'TI-wilds.gif',                  1268,  643 ],
+      [ 'TI-nelemar.gif',                2704, 2882, 1598, 1724, 'TI-wilds.gif',                  1290, 2814 ],
+      [ 'WL-wehnimers.gif',              2188, 2494,  976, 1144, 'TI-teras.gif',                   834, 2204 ],
+      [ 'WL-gates.gif',                  1956, 2160, 1600, 1660, 'WL-danjirland.gif',              226, 2592 ],
+      [ 'WL-danjirland.gif',               96,  354, 2500, 2672, 'WL-gates.gif',                  2052, 1636 ],
+      [ 'EN-tavaalor.gif',               2380, 2618,  322,  446, 'EN-cemetery.gif',                350, 1906 ],
+      [ 'EN-tavaalor.gif',               2348, 2618, 1794, 1912, 'EN-cemetery.gif',                170, 2178 ],
+      [ 'EN-tavaalor.gif',               1058, 1362, 1802, 1920, 'EN-victory.gif',                2510,  560 ],
+      [ 'EN-tavaalor.gif',               1030, 1344,  242,  364, 'EN-fearling.gif',               2158, 1946 ],
+      [ 'EN-tavaalor.gif',                 48,  266, 1260, 1480, 'EN-fearling.gif',               2768, 1882 ],
+      [ 'EN-cemetery.gif',                230,  472, 1816, 1992, 'EN-tavaalor.gif',               2498,  374 ],
+      [ 'EN-cemetery.gif',                 56,  294, 2096, 2266, 'EN-tavaalor.gif',               2490, 1844 ],
+      [ 'EN-victory.gif',                2360, 2656,  492,  612, 'EN-tavaalor.gif',               1210, 1850 ],
+      [ 'EN-victory.gif',                1812, 2154,  688,  788, 'EN-fearling.gif',               1658, 2182 ],
+      [ 'EN-victory.gif',                1494, 1840,  614,  670, 'EN-fearling.gif',               1148, 2188 ],
+      [ 'EN-fearling.gif',               1986, 2324, 1876, 1998, 'EN-tavaalor.gif',               1184,  296 ],
+      [ 'EN-fearling.gif',               2644, 2892, 1858, 1932, 'EN-tavaalor.gif',                162, 1378 ],
+      [ 'EN-fearling.gif',               2698, 2892, 1810, 1858, 'EN-tavaalor.gif',                162, 1378 ],
+      [ 'EN-fearling.gif',                990, 1316, 2132, 2238, 'EN-victory.gif',                1660,  642 ],
+      [ 'EN-fearling.gif',               1570, 1742, 2120, 2242, 'EN-victory.gif',                1984,  744 ],
+      [ 'EN-fearling.gif',               1214, 1500,   84,  212, 'EN-sylvarraend.gif',            2492, 2223 ],
+      [ 'EN-sylvarraend.gif',            2396, 2588, 2162, 2278, 'EN-fearling.gif',               1350,  150 ],
+      [ 'EN-gyldemar.gif',               2118, 2330, 1364, 1486, 'EN-old-tafaendryl.gif',          482, 2192 ],
+      [ 'EN-gyldemar.gif',               2052, 2118, 1545, 1486, 'EN-old-tafaendryl.gif',          482, 2192 ],
+      [ 'EN-gyldemar.gif',                 84,  374, 2232, 2408, 'EN-sylvarraend.gif',            1436, 1148 ],
+      [ 'EN-old-tafaendryl.gif',          372,  592, 2156, 2230, 'EN-gyldemar.gif',               2186, 1434 ],
+      [ 'EN-sapphire.gif',               2636, 2944, 1870, 1992, 'EN-taillistim.gif',              246,  716 ],
+      [ 'EN-sapphire.gif',               2202, 2522,   30,  150, 'EN-taillistim.gif',             2726, 2222 ],
+      [ 'EN-sylvarraend.gif',            1330, 1548, 1106, 1184, 'EN-gyldemar.gif',                228, 2372 ],
+      [ 'EN-sylvarraend.gif',              74,  498,  978, 1096, 'EN-sapphire.gif',               2394,  440 ],
+      [ 'EN-sapphire.gif',               2270, 2524,  386,  500, 'EN-sylvarraend.gif',             282, 1046 ],
+      [ 'EN-sapphire.gif',               1210, 1464,  704,  828, 'EN-skull.gif',                  1332, 2808 ],
+      [ 'EN-skull.gif',                  1240, 1436, 2740, 2868, 'EN-sapphire.gif',               1386,  772 ],
+      [ 'EN-taillistim.gif',               78,  416,  614,  866, 'EN-sapphire.gif',               2788, 1940 ],
+      [ 'EN-taillistim.gif',             2552, 2900, 2154, 2270, 'EN-sapphire.gif',               2364,  100 ],
+      [ 'IMT-icemule.gif',                 76,  188, 1654, 1730, 'IMT-east-west-north-gates.gif',  632, 1266 ],
+      [ 'IMT-icemule.gif',               1132, 1272,  564,  640, 'IMT-east-west-north-gates.gif', 2156, 2076 ],
+      [ 'IMT-icemule.gif',               2214, 2320, 1482, 1560, 'IMT-east-west-north-gates.gif',  226, 2110 ],
+      [ 'IMT-icemule.gif',               1136, 1270, 2750, 2826, 'IMT-south-gate.gif',             856, 1084 ],
+      [ 'IMT-east-west-north-gates.gif',  580,  694, 1228, 1306, 'IMT-icemule.gif',                132, 1690 ],
+      [ 'IMT-east-west-north-gates.gif', 2088, 2226, 2043, 2114, 'IMT-icemule.gif',               1198,  602 ],
+      [ 'IMT-east-west-north-gates.gif',  178,  282, 2076, 2150, 'IMT-icemule.gif',               2260, 1520 ],
+      [ 'IMT-east-west-north-gates.gif',  230,  478, 2196, 2260, 'IMT-south-gate.gif',            1126,  814 ],
+      [ 'IMT-east-west-north-gates.gif',  390,  638, 1340, 1414, 'IMT-south-gate.gif',             694,  812 ],
+      [ 'RR-riversrest.gif',              300,  544,   84,  206, 'RR-maelstrom.gif',              1946, 2668 ],
+      [ 'RR-riversrest.gif',             1518, 1682,  298,  372, 'RR-citadel.gif',                1988, 1046 ],
+      [ 'RR-riversrest.gif',              430,  706, 1608, 1680, 'VO-caravansary.gif',            1688, 1782 ],
+      [ 'RR-maelstrom.gif',              1814, 2076, 2626, 2702, 'RR-riversrest.gif',              416,  148 ],
+      [ 'RR-citadel.gif',                1868, 2138, 1010, 1082, 'RR-riversrest.gif',             1598,  336 ],
+      [ 'VO-caravansary.gif',            1556, 1824, 1742, 1816, 'RR-riversrest.gif',              576, 1642 ],
+  ].each{|link|
+    map = MapData[link[0]]
+    next unless map
+    link[5] = MapData[link[5]]
+    next unless link[5]
+    map[:links] = [] unless map[:links]
+    map[:links] << link[1..-1]
+  }
+  def MapData.associate(filename)
+    key = MapData.normalize_filename(filename)
+    if Data[key]
+      Data[key][:filename] = filename
+      return Data[key]
+    end
+
+    Data[key] = { :name => key, :shortname => key, :categories => [] }
+  end
+
+  def MapData.data
+    Data
+  end
+end
+
+
 trouble = script.vars.any? { |var| var =~ /trouble/i }
 
 Settings.load
@@ -58,7 +347,7 @@ global_scale       = Settings['global_scale']
 global_scale       = 1.0 if global_scale.nil?
 map_scale          = Settings['map_scale'] || Hash.new
 
-$narost_maps  ||= Hash.new
+$narost_maps ||= Hash.new
 scale           = nil
 map_offset_x    = nil
 map_offset_y    = nil
@@ -88,13 +377,10 @@ menu_tags_list  = nil
 current_tag     = nil
 scale_list      = [ 10, 25, 33, 50, 66, 75, 90, 100, 110, 125, 133, 150, 166, 175, 190, 200 ]
 
-used_maps = Array.new
-Map.list.each { |room| used_maps.push(room.map_name) unless room.map_name.nil? or used_maps.include?(room.map_name) }
-used_maps.sort!
-
-missing_maps = Array.new
-used_maps.each { |map_name| missing_maps.push(map_name) unless File.exists?("#{map_dir}#{map_name}") }
-echo "These map images were not found: #{missing_maps.join(', ')}" unless missing_maps.empty?
+used_maps = Set.new
+Map.list.each {|room| used_maps.add(room.map_name) unless room.map_name.nil? }
+missing_maps = used_maps.find_all{|map_name| not File.exists?("#{map_dir}#{map_name}")}
+echo "These map images were not found: #{missing_maps.sort.join(', ')}" unless missing_maps.empty?
 missing_maps = nil
 
 unless File.exists?("#{map_dir}circle.png")
@@ -163,13 +449,13 @@ change_map = proc { |file_name|
 			map_offset_y = scroller.allocation.height.to_i/2
 			layout.set_size(($narost_maps[current_map]['width']*scale) + map_offset_x*2, ($narost_maps[current_map]['height']*scale) + map_offset_y*2)
 			layout.move(image, map_offset_x, map_offset_y)
-			tag_list = Array.new
+			tag_list = Set.new
 			short_current_map = current_map.sub(/^.*\//, '')
 			Map.list.each { |room|
 				next if room.nil?
 				next unless room.image == short_current_map
 				room.tags.each { |tag|
-					tag_list.push(tag) unless (tag =~ /^silver\-cost/) or tag_list.include?(tag)
+					tag_list.add(tag) unless (tag =~ /^silver\-cost/) or tag_list.include?(tag)
 				}
 			}
 			menu_tags_list.children.each { |child| child.destroy }
@@ -180,7 +466,7 @@ change_map = proc { |file_name|
 					show_tag.call(nil) if owner.active?
 				}
 			}
-			tag_list.sort { |a,b| dis = a.split(' ')[-1].to_s <=> b.split(' ')[-1].to_s; if (dis == 0); a.split(' ')[-2].to_s <=> b.split(' ')[-2].to_s; else; dis; end }.each { |tag|
+      tag_list.sort_by{|tag| tag.downcase}.each {|tag|
 				menu_tag = Gtk::RadioMenuItem.new(group, tag)
 				menu_tags_list.append(menu_tag)
 				menu_tag.signal_connect('toggled') { |owner|
@@ -223,95 +509,38 @@ change_room = proc {
 		scroller.hadjustment.value = current_room.map_x.to_i*scale
 		scroller.vadjustment.value = current_room.map_y.to_i*scale
 		layout.move(circle_image, (current_room.map_x.to_i*scale) - (circle_width/2) + map_offset_x, (current_room.map_y.to_i*scale) - (circle_height/2) + map_offset_y)
-		window.title = "Narost: #{Char.name} (##{current_room.id})"
+		window.title = "xNarost: #{Char.name} (##{current_room.id})"
 	}
 }
 
 no_room = proc {
 	Gtk.queue { 
 		layout.move(circle_image, -circle_width, -circle_height)
-		window.title = "Narost: #{Char.name}"
+		window.title = "xNarost: #{Char.name}"
 	}
 }
 
-find_clicked_link = proc { |click_x, click_y|
-	clicked_link = nil
-	map_name = current_map.slice(/([^\/\\]+)$/)
-	# fixme: use tags in map database for this
-	map_links = [
-		[ 'TI-teras.gif',                  1962, 2238,   68,  192, 'TI-wilds.gif',                   840, 1252 ],
-		[ 'TI-teras.gif',                   710,  972, 2130, 2260, 'WL-wehnimers.gif',              2338, 1070 ],
-		[ 'TI-wilds.gif',                  1124, 1412,  604,  682, 'TI-vtull.gif',                  2276, 1638 ],
-		[ 'TI-wilds.gif',                   678, 1006, 1218, 1296, 'TI-teras.gif',                  2100,  130 ],
-		[ 'TI-wilds.gif',                  1190, 1390, 2750, 2878, 'TI-nelemar.gif',                2794, 1670 ],
-		[ 'TI-vtull.gif',                  2100, 2452, 1598, 1672, 'TI-wilds.gif',                  1268,  643 ],
-		[ 'TI-nelemar.gif',                2704, 2882, 1598, 1724, 'TI-wilds.gif',                  1290, 2814 ],
-		[ 'WL-wehnimers.gif',              2188, 2494,  976, 1144, 'TI-teras.gif',                   834, 2204 ],
-		[ 'WL-gates.gif',                  1956, 2160, 1600, 1660, 'WL-danjirland.gif',              226, 2592 ],
-		[ 'WL-danjirland.gif',               96,  354, 2500, 2672, 'WL-gates.gif',                  2052, 1636 ],
-		[ 'EN-tavaalor.gif',               2380, 2618,  322,  446, 'EN-cemetery.gif',                350, 1906 ],
-		[ 'EN-tavaalor.gif',               2348, 2618, 1794, 1912, 'EN-cemetery.gif',                170, 2178 ],
-		[ 'EN-tavaalor.gif',               1058, 1362, 1802, 1920, 'EN-victory.gif',                2510,  560 ],
-		[ 'EN-tavaalor.gif',               1030, 1344,  242,  364, 'EN-fearling.gif',               2158, 1946 ],
-		[ 'EN-tavaalor.gif',                 48,  266, 1260, 1480, 'EN-fearling.gif',               2768, 1882 ],
-		[ 'EN-cemetery.gif',                230,  472, 1816, 1992, 'EN-tavaalor.gif',               2498,  374 ],
-		[ 'EN-cemetery.gif',                 56,  294, 2096, 2266, 'EN-tavaalor.gif',               2490, 1844 ],
-		[ 'EN-victory.gif',                2360, 2656,  492,  612, 'EN-tavaalor.gif',               1210, 1850 ],
-		[ 'EN-victory.gif',                1812, 2154,  688,  788, 'EN-fearling.gif',               1658, 2182 ],
-		[ 'EN-victory.gif',                1494, 1840,  614,  670, 'EN-fearling.gif',               1148, 2188 ],
-		[ 'EN-fearling.gif',               1986, 2324, 1876, 1998, 'EN-tavaalor.gif',               1184,  296 ],
-		[ 'EN-fearling.gif',               2644, 2892, 1858, 1932, 'EN-tavaalor.gif',                162, 1378 ],
-		[ 'EN-fearling.gif',               2698, 2892, 1810, 1858, 'EN-tavaalor.gif',                162, 1378 ],
-		[ 'EN-fearling.gif',                990, 1316, 2132, 2238, 'EN-victory.gif',                1660,  642 ],
-		[ 'EN-fearling.gif',               1570, 1742, 2120, 2242, 'EN-victory.gif',                1984,  744 ],
-		[ 'EN-fearling.gif',               1214, 1500,   84,  212, 'EN-sylvarraend.gif',            2492, 2223 ],
-		[ 'EN-sylvarraend.gif',            2396, 2588, 2162, 2278, 'EN-fearling.gif',               1350,  150 ],
-		[ 'EN-gyldemar.gif',               2118, 2330, 1364, 1486, 'EN-old-tafaendryl.gif',          482, 2192 ],
-		[ 'EN-gyldemar.gif',               2052, 2118, 1545, 1486, 'EN-old-tafaendryl.gif',          482, 2192 ],
-		[ 'EN-gyldemar.gif',                 84,  374, 2232, 2408, 'EN-sylvarraend.gif',            1436, 1148 ],
-		[ 'EN-old-tafaendryl.gif',          372,  592, 2156, 2230, 'EN-gyldemar.gif',               2186, 1434 ],
-		[ 'EN-sapphire.gif',               2636, 2944, 1870, 1992, 'EN-taillistim.gif',              246,  716 ],
-		[ 'EN-sapphire.gif',               2202, 2522,   30,  150, 'EN-taillistim.gif',             2726, 2222 ],
-		[ 'EN-sylvarraend.gif',            1330, 1548, 1106, 1184, 'EN-gyldemar.gif',                228, 2372 ],
-		[ 'EN-sylvarraend.gif',              74,  498,  978, 1096, 'EN-sapphire.gif',               2394,  440 ],
-		[ 'EN-sapphire.gif',               2270, 2524,  386,  500, 'EN-sylvarraend.gif',             282, 1046 ],
-		[ 'EN-sapphire.gif',               1210, 1464,  704,  828, 'EN-skull.gif',                  1332, 2808 ],
-		[ 'EN-skull.gif',                  1240, 1436, 2740, 2868, 'EN-sapphire.gif',               1386,  772 ],
-		[ 'EN-taillistim.gif',               78,  416,  614,  866, 'EN-sapphire.gif',               2788, 1940 ],
-		[ 'EN-taillistim.gif',             2552, 2900, 2154, 2270, 'EN-sapphire.gif',               2364,  100 ],
-		[ 'IMT-icemule.gif',                 76,  188, 1654, 1730, 'IMT-east-west-north-gates.gif',  632, 1266 ],
-		[ 'IMT-icemule.gif',               1132, 1272,  564,  640, 'IMT-east-west-north-gates.gif', 2156, 2076 ],
-		[ 'IMT-icemule.gif',               2214, 2320, 1482, 1560, 'IMT-east-west-north-gates.gif',  226, 2110 ],
-		[ 'IMT-icemule.gif',               1136, 1270, 2750, 2826, 'IMT-south-gate.gif',             856, 1084 ],
-		[ 'IMT-east-west-north-gates.gif',  580,  694, 1228, 1306, 'IMT-icemule.gif',                132, 1690 ],
-		[ 'IMT-east-west-north-gates.gif', 2088, 2226, 2043, 2114, 'IMT-icemule.gif',               1198,  602 ],
-		[ 'IMT-east-west-north-gates.gif',  178,  282, 2076, 2150, 'IMT-icemule.gif',               2260, 1520 ],
-		[ 'IMT-east-west-north-gates.gif',  230,  478, 2196, 2260, 'IMT-south-gate.gif',            1126,  814 ],
-		[ 'IMT-east-west-north-gates.gif',  390,  638, 1340, 1414, 'IMT-south-gate.gif',             694,  812 ],
-		[ 'RR-riversrest.gif',              300,  544,   84,  206, 'RR-maelstrom.gif',              1946, 2668 ],
-		[ 'RR-riversrest.gif',             1518, 1682,  298,  372, 'RR-citadel.gif',                1988, 1046 ],
-		[ 'RR-riversrest.gif',              430,  706, 1608, 1680, 'VO-caravansary.gif',            1688, 1782 ],
-		[ 'RR-maelstrom.gif',              1814, 2076, 2626, 2702, 'RR-riversrest.gif',              416,  148 ],
-		[ 'RR-citadel.gif',                1868, 2138, 1010, 1082, 'RR-riversrest.gif',             1598,  336 ],
-		[ 'VO-caravansary.gif',            1556, 1824, 1742, 1816, 'RR-riversrest.gif',              576, 1642 ],
-	]
-	for link in map_links
-		if (link[0] =~ /#{map_name}/i) and (click_x > link[1]) and (click_x < link[2]) and (click_y > link[3]) and (click_y < link[4])
-			clicked_link = [ "#{map_dir}#{link[5]}", link[6], link[7] ]
-			break
-		end
-	end
-	clicked_link
-}
+def find_clicked_link(key, click_x, click_y)
+  map = MapData[key]
+  return unless map
+  return unless map[:links]
+  map[:links].each{|link|
+    if (click_x > link[0]) and (click_x < link[1]) and (click_y > link[2]) and (click_y < link[3])
+			return [ "#{map_dir}#{link[4][:filename]}", link[5], link[6] ]
+    end
+  }
+  nil
+end
 
 find_clicked_room = proc { |click_x, click_y|
 	Map.list.find { |room| 
 		not room.nil? and not room.map_name.nil? and not room.map_x.nil? and not room.map_y.nil? and not room.map_roomsize.nil? and (current_map =~ /#{room.map_name}$/) and (room.map_x > click_x - (room.map_roomsize/2)) and (room.map_x < click_x + (room.map_roomsize/2)) and (room.map_y > click_y - (room.map_roomsize/2)) and (room.map_y < click_y + (room.map_roomsize/2)) }
 }
 
+
 Gtk.queue {
 	window = Gtk::Window.new
-	window.title = "Narost: #{Char.name}"
+	window.title = "XNarost: #{Char.name}"
 	window.signal_connect('delete_event') { narost_exit = true }
 	window.signal_connect('size_allocate') { window_resized = true }
 
@@ -391,12 +620,50 @@ Gtk.queue {
 		}
 	}
 
+  used_maps.each{|filename|
+    MapData.associate(filename)
+  }
+
+	make_gtk_submenu = proc{|title|
+		item = Gtk::MenuItem.new(title, false)
+		item.submenu = Gtk::Menu.new
+		item
+  }
+
+  make_gtk_mapitem = proc{|mapdata, title=nil|
+		title = mapdata[:shortname] unless title
+		item = Gtk::MenuItem.new(title, false)
+		item.signal_connect('activate') { change_map.call("#{map_dir}#{mapdata[:filename]}"); no_room.call }
+    item
+  }
+
+
+	map_submenus = {}
+  map_special_submenus = {'ALL' => make_gtk_submenu.call('All Maps')}
+
+	# Create category menus
+	for key, data in MapData.data.sort_by{|key, map| map[:shortname].downcase}
+		next unless data[:categories].length > 0  # Only want categorized maps.
+    next unless data[:filename]  # Skip not-found maps
+		data[:categories].each{|cat|
+			map_submenus[cat] = make_gtk_submenu.call(cat) unless map_submenus[cat]
+			map_submenus[cat].submenu.append(make_gtk_mapitem.call(data))
+		}
+	end
+
+	# Create All/Uncategorized Menus
+	for key, data in MapData.data.sort_by{|key, map| map[:name].downcase}
+		next unless data[:filename]  # Skip not-found maps
+    map_special_submenus['ALL'].submenu.append(make_gtk_mapitem.call(data, data[:name]))
+		next if data[:categories].length > 0  # Only want categorized maps.
+		map_special_submenus['UNCATEGORIZED'] = make_gtk_submenu.call('Uncategorized Maps') unless map_special_submenus['UNCATEGORIZED']
+    map_special_submenus['UNCATEGORIZED'].submenu.append(make_gtk_mapitem.call(data, data[:name]))
+	end
+
 	menu_map_list = Gtk::Menu.new
-	used_maps.each { |map_name|
-		item = Gtk::MenuItem.new(map_name.sub(/(?:\-[0-9]+)?\.[A-z]{1,3}$/,''), false)
-		item.signal_connect('activate') { change_map.call("#{map_dir}#{map_name}"); no_room.call }
-		menu_map_list.append(item)
-	}
+  map_submenus.sort.each{|unused,submenu| menu_map_list.append(submenu) }
+  menu_map_list.append(Gtk::SeparatorMenuItem.new)
+	map_special_submenus.sort.each{|unused,submenu| menu_map_list.append(submenu) }
 
 	menu_view_map = Gtk::MenuItem.new('view map')
 	menu_view_map.submenu = menu_map_list
@@ -455,26 +722,27 @@ Gtk.queue {
 	menu.append(menu_tags)
 	menu.show_all
 
-=begin
 	layout.signal_connect('scroll_event') { |owner,ev|
 		Gtk.queue {
-			if ev.direction == Gdk::EventScroll::DOWN
-				new_scale = scale_list[scale_list.index((scale*100).to_i)-1]/100.0
-			elsif ev.direction == Gdk::EventScroll::UP
-				new_scale = scale_list[scale_list.index((scale*100).to_i)+1]/100.0
-			end
-			unless new_scale.nil?
-				if global_scale
-					global_scale = new_scale
-				else
-					map_scale[current_map] = new_scale
-				end
-				change_map.call(current_map)
-				change_room.call
-			end
+      if ev.state == Gdk::Window::CONTROL_MASK and current_map
+        if ev.direction == Gdk::EventScroll::DOWN
+          new_scale = scale_list[scale_list.index((scale*100).to_i)-1]/100.0
+        elsif ev.direction == Gdk::EventScroll::UP
+          new_scale = scale_list[scale_list.index((scale*100).to_i)+1]/100.0
+        end
+        unless new_scale.nil?
+          if global_scale
+            global_scale = new_scale
+          else
+            map_scale[current_map] = new_scale
+          end
+          change_map.call(current_map)
+          change_room.call
+        end
+      end
 		}
 	}
-=end
+
 	layout.add_events(Gdk::Event::BUTTON_PRESS_MASK)
 	layout.signal_connect('button_press_event') { |owner, ev|
 		if ev.button == 3
@@ -559,7 +827,7 @@ Gtk.queue {
 							respond '[narost: no matching room found]'
 						end
 					else
-						if clicked_link = find_clicked_link.call(click_x, click_y)
+						if clicked_link = find_clicked_link(current_map, click_x, click_y)
 							change_map.call(clicked_link[0])
 							scroller.hadjustment.value = clicked_link[1].to_i*scale
 							scroller.vadjustment.value = clicked_link[2].to_i*scale
