@@ -18,9 +18,13 @@
 	game: Gemstone
 	tags: core, movement
 
-  version: 0.3 (2017-05-26) based on narost.lic from 2014-08-24
+  version: 0.4 (2017-05-27) based on narost.lic from 2014-08-24
 
   changelog:
+    version 0.4 (2017-05-27)
+     * Fix issue where filename comparisons were case-sensitive, causing map menu metadata to not apply correctly.
+     * Fix issue where maps with no associated metadata were not properly added to the list.
+
     version 0.3 (2017-05-26)
      * Added most of the rest of the map metadata.  Remove the "This is experimental!" nag-message.
      * Sort the list of tags.
@@ -235,7 +239,7 @@ class MapData
       'wl-wizard_guild' => {:name => 'Wehnimer\'s Landing - Wizard Guild', :shortname => 'Wizard Guild (Wehnimer\'s)', :categories => ['Wehnimer\'s Landing', 'Guilds']},
   }
   def MapData.normalize_filename(filename)
-    filename.gsub(/(-\d+)?\..+$/, '')
+    filename.gsub(/(-\d+)?\..+$/, '').downcase
   end
   def MapData.[](key)
     Data[MapData.normalize_filename(key)]
@@ -316,7 +320,7 @@ class MapData
       return Data[key]
     end
 
-    Data[key] = { :name => key, :shortname => key, :categories => [] }
+    Data[key] = { :name => key, :shortname => key, :categories => [], :filename => filename}
   end
 
   def MapData.data
