@@ -18,9 +18,13 @@
 	game: Gemstone
 	tags: core, movement
 
-  version: 0.5 (2017-05-27) based on narost.lic from 2014-08-24
+  version: 0.5.1 (2017-05-29) based on narost.lic from 2014-08-24
 
   changelog:
+    version 0.5.1 (2017-05-29)
+     * fix some metadata errors between Solhaven/Vornavis
+     * remove inadvertent debugging code left on during drag.
+
     version 0.5 (2017-05-29)
      * Improve ctrl+mousewheel zoom to not reset the map to the origin
      * Fix some bugs that would cause the circle image to be visible when it shouldn't be
@@ -159,7 +163,7 @@ class MapData
         'imt-whitehaven2' => {:name => 'Icemule Trace - House White Haven (Map #1)', :shortname => 'House White Haven (Map #1)', :categories => ['Icemule Trace', 'CHE']},
         'imt-white_haven' => {:name => 'Icemule Trace - House White Haven (Map #2)', :shortname => 'House White Haven (Map #2)', :categories => ['Icemule Trace', 'CHE']},
         'imt-wizard_guild' => {:name => 'Icemule Trace - Wizard Guild', :shortname => 'Wizard Guild (Icemule)', :categories => ['Icemule Trace', 'Guilds']},
-        'premium_halls' => {:name => 'Premium Halls of Elanthia', :shortname => 'Premium Halls of Elanthia', :categories => ['Premium', 'Elven Nations', 'Wehnimer\'s Landing', 'Zul Logoth', 'River\'s Rest', 'Icemule Trace', 'Solhaven', 'Teras Isle']},
+        'premium_halls' => {:name => 'Premium Halls of Elanthia', :shortname => 'Premium Halls of Elanthia', :categories => ['Premium', 'Elven Nations', 'Wehnimer\'s Landing', 'Zul Logoth', 'River\'s Rest', 'Icemule Trace', 'Vornavis', 'Teras Isle']},
         'red_forest' => {:name => 'Red Forest, The', :shortname => 'Red Forest', :categories => ['Wehnimer\'s Landing', 'Elven Nations']},
         'rr-beacon_hall' => {:name => 'River\'s Rest - Beacon Hall Archive', :shortname => 'Beacon Hall Archive', :categories => ['River\'s Rest', 'CHE']},
         'rr-citadel' => {:name => 'River\'s Rest - Citadel', :shortname => 'Citadel', :categories => ['River\'s Rest']},
@@ -855,7 +859,6 @@ Gtk.queue {
                         Gtk.queue {
                             scroller.hadjustment.value = [(before_drag['hadj'] + diff_x), ($narost_maps[current_map]['width']*scale)].min
                             scroller.vadjustment.value = [(before_drag['vadj'] + diff_y), ($narost_maps[current_map]['height']*scale)].min
-                            echo "x=#{scroller.hadjustment.value} y=#{scroller.vadjustment.value}"
                         }
                     end
                 end

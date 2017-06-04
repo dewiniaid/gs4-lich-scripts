@@ -1,0 +1,175 @@
+script.want_downstream = false
+script.want_downstream_xml = true
+
+
+TYPEAHEAD = 3
+CONTAINER = 'backpack'
+
+
+class Jar
+  attr_accessor :gem, :full, :count, :container
+  attr_reader :id
+
+  GEM_ENDINGS = {
+      'rubies' => 'ruby',
+      'lapis lazuli' => 'lapis lazuli'
+  }
+
+  def initialize(id, gem, container, count=nil, full=nil)
+    @id = id
+    @gem = gem
+    @container = container
+    @count = count
+    @full = full
+  end
+
+  def Jar.normalize(gem)
+    if gem =~ /^(?:tiny|small|medium|large) (.* pearl)$/
+      return $1
+    end
+    if gem =~ /^some (.*)$/
+      return $1
+    end
+    return gem
+  end
+
+  def Jar.make_singular(gem)
+    plural, singular = GEM_ENDINGS.find{|p,s| gem.end_with?(p) }
+    if plural
+      gem = gem[0..(-plural.length - 1)] + singular if plural
+    else
+      gem = gem[0..-2]  # Subtract 's'
+    end
+    return Jar.normalize(gem)
+  end
+end
+
+
+# This bit of trickery (stolen from ;box scan) forces inventory data to be updated.
+# You can comment it out or something similar if you're reasonably sure your inventory is up to date already
+fput 'inv containers'
+xml = waitfor 'You are wearing'
+# pattern = /<a exist="(\d+)"/g
+
+xml.scan(/(?:<a exist="(\d+)")+/).each{|match|
+  exist = match[0]
+  fput "look in ##{exist}"
+  waitfor '<prompt'
+}
+
+# Find all of our jars and get their stats.
+jars = {}
+
+waiting = Set.new  # Item IDs we're waiting to see a response from.  Manages typeahead too.
+
+count_next_jar = proc {
+  # https://regex101.com/r/yPEecm/1/
+  # group 1 = exist ID.
+  # group 2 = nil unless empty
+  # group 3 = count
+  # group 4 = nil unless full
+  while true
+    next unless script.gets =~ /.*<a exist="(\d+)".*?<\/a> (?:(is empty\.)|(?:you see (\d+) portions?.*?(It is full\.)?))$/
+    id = $1
+    next unless waiting.delete?(id)
+    jars[id].count = $3.to_i
+    jars[id].full  = !$4.nil?
+    break
+  end
+}
+
+
+GameObj.inv.each{|container|
+  next unless container.contents.length > 0  # Not a container, closed, or empty.
+  container.contents.each{|item|
+    next unless item.noun == 'jar'  # Not a jar, skip.
+    echo item.inspect
+    gem = item.after_name[11..-1] if item.after_name.start_with?('containing ')
+    gem = Jar.make_singular(gem) if gem
+    jars[item.id] = Jar.new(item.id, gem, container.id, nil, nil)
+    if gem
+      if waiting.length >= TYPEAHEAD
+        count_next_jar.call until waiting.length < TYPEAHEAD
+      end
+      waiting.add(item.id)
+      put "look in ##{item.id}"
+    end
+  }
+}
+count_next_jar.call until waiting.length == 0
+
+# Organize jars by gem type
+jars_by_gem = {}
+jars.each{|id, jar|
+  jars_by_gem[jar.gem] = Set.new unless jars_by_gem[jar.gem]
+  jars_by_gem[jar.gem] << jar
+}
+
+
+# Check container
+fput "look in #{CONTAINER}"
+gems = {}
+xml = waitfor 'In the <a', 'There is nothing in there.'
+if xml =~ /In the .* you see (.*)/
+  xml = $1
+  xml.scan(/<a exist="(\d+)" noun="(.+?)">([^<]+)/).each{|match|
+    name = Jar.normalize(match[2])
+    id = match[0]
+    gems[name] = Set.new unless gems[name]
+    gems[name].add(id)
+  }
+end
+
+# gems.each {|k,v|
+#   echo "#{k}: #{v.inspect}"
+# }
+#
+# jars.each {|k,v| echo v.inspect }
+#
+# echo gems.inspect
+#
+# echo jars_by_gem.inspect
+
+# Process gems by type
+
+last_jar = nil
+gems.each{|name, ids|
+  if last_jar
+    fput "put ##{last_jar.id} in ##{last_jar.container}"
+    last_jar = nil
+  end
+  unless jars_by_gem.include?(name)
+    echo "There are no jars matching '#{name}'"
+    next
+  end
+  available = jars_by_gem[name].find_all{|jar| not jar.full }.sort_by {|a,b| b.count - a.count}
+  if available.length == 0
+    echo "All jars for '#{name}' are full."
+    next
+  end
+  ix = 0
+  last_jar = available[ix]
+  fput "get ##{last_jar.id}"
+  ids.each{|gemid|
+    fput "get ##{gemid}"
+    fput "put ##{gemid} in ##{last_jar.id}"
+    xml = nil
+    xml = script.gets until xml =~ /You (put your.*?into your empty|add.*?to the contents of)/
+    last_jar.count += 1
+    last_jar.full = true if xml.include?(', filling it.')  # Jar is now full
+    echo xml.inspect
+    echo last_jar.inspect
+    if last_jar.full
+      fput "put ##{last_jar.id} in ##{last_jar.container}"
+      last_jar = nil
+      ix += 1
+      if ix >= available.length
+        echo "All jars for '#{name}' are now full."
+        break
+      else
+        last_jar = available[ix]
+        fput "get ##{last_jar.id}"
+      end
+    end
+  }
+}

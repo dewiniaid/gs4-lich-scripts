@@ -1,0 +1,71 @@
+# fput "get calipers"
+# # fput lmas calibrate calipers
+# # waitrt?
+# fput "lmas measure box"
+# waitrt
+# fput "put calipers on table"
+# fput "get lockpick from table"
+# fput "pick box with lockpick"
+# waitfor "You settle into the"
+# waitrt?
+# fput "put lockpick on table"
+# fput "get calipers on table"
+# fput "lmas calibrate calipers"
+# waitrt
+# fput "give calipers to #{GameObj.npcs[0].noun}"
+
+
+
+
+if GameObj.npcs.length == 0
+  echo "I can't find any NPCs..."
+  exit
+end
+
+if GameObj.npcs.length > 1
+  # pick one at random
+  ix = (rand * GameObj.npcs.length).floor.to_i
+  move "ask #{GameObj.npcs[ix]} about training"
+  waitfor "Take the calipers"
+end
+
+unless checkloot.include?("table")
+  waitfor "a small wooden table"
+end
+
+reps = 0
+attempts = 0
+
+while true
+  reps += 1
+  # Attune the calipers first
+  fput "get calipers from table"
+  fput "lmas calibrate calipers"
+  waitfor "Roundtime", "You're good"
+  waitrt?
+
+  # Now loop until we get a rep
+  while true
+    attempts += 1
+    fput "lmas measure box"
+    waitrt
+    fput "put calipers on table"
+    fput "get vaalin lockpick"
+    fput "pick box with lockpick"
+    waitfor "You settle into the"
+    waitrt?
+    fput "put lockpick on table"
+    fput "get calipers from table"
+    fput "lmas calibrate calipers"
+    waitrt
+    fput "give calipers to #{GameObj.npcs[0].noun}"
+    result = waitfor "repetitions remaining", "You have completed your training task", "Give it another shot."
+    break if result.include?("repetitions remaining")
+    if result.include?("You have completed your training task.")
+      move "out"
+      echo "Completed #{reps} rep(s) in #{attempts} attempt(s)"
+      exit
+    end
+    fput "get calipers from table"
+  end
+end

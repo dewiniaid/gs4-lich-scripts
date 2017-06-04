@@ -1,0 +1,33 @@
+
+def find_matching_item(items, words)
+  # Returns the first matching item, nil if no match.
+  items.find{|item|
+    noun = item.noun.downcase
+    next(false) unless noun.start_with?(words.last)
+    next(true) if words.length < 2
+    adjectives, *unused = item.name.downcase.rpartition(noun)
+    words[0..-2].all?{|word|
+      adjectives.start_with?(word) or adjectives.include?(" " + word)
+    }
+  }
+end
+
+unless script.vars.length > 0
+  echo 'Specify a container'
+  exit
+end
+
+container = find_matching_item(GameObj.inv, script.vars[1..-1])
+gems = container.contents.find_all{|item| not item.name =~ /grave-incised|wolf-shaped|snowflake-cut/}
+while gems.length > 0
+  echo "#{gems.length} gems remaining."
+  gem = gems.pop  # Truly outrageous
+  put "get ##{gem.id}"
+  put "put ##{gem.id} in my dwarf"
+  fput "turn my dwarf"
+  waitrt
+  # sleep 1
+  fput "get ##{gem.id}"
+  fput "put ##{gem.id} in ##{container.id}"
+end
+echo 'Done!'
