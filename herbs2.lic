@@ -10,10 +10,13 @@
 	  author: LostRanger (thisgenericname@gmail.com)
 	    game: Gemstone
 	    tags: core
-	 version: 0.1
+	 version: 0.3
 	required: Lich >= 4.2.0
 
 	changelog:
+		0.3 (2017-06-06):
+			Should now output correct form of Monsterbold for all clients, not just Stormfront.
+            Should no longer output XML to non-Stormfront clients.
 		0.2 (2017-04-22):
 			No longer highlights nerve scars while nerve wounds are still present.
 		0.1 (2017-04-18):
@@ -25,7 +28,7 @@ def boldif(cond, text)
   #
   # Note: This is a super-naive implementation and is not suitable for text that might look like XML
   if cond
-    puts "<b>#{text}</b>"
+    puts "#{monsterbold_start}#{text}#{monsterbold_end}"
   else
     puts text
   end
@@ -34,7 +37,7 @@ end
 limb_wounds = [Wounds.rhand, Wounds.rarm, Wounds.rleg, Wounds.lhand, Wounds.larm, Wounds.lleg]
 limb_scars = [Scars.rhand, Scars.rarm, Scars.rleg, Scars.lhand, Scars.larm, Scars.lleg]
 
-puts "<output class=\"mono\" />\r\n"
+puts "<output class=\"mono\" />\r\n" if $frontend == "stormfront"
 puts "Herbs/Ales/Tarts"
 puts
 puts "INJURY            LANDING              ICEMULE                 TERAS"
@@ -78,4 +81,4 @@ boldif Wounds.nerves > 1, "   Convulsions    Bolmara Potion       Snowflake Elix
 boldif (Scars.nerves == 1 and Wounds.nerves == 0), "   Slur Speech    Torban Leaf          Ma Leaftoe's Special    Miner's Muddy'"
 boldif (Scars.nerves > 1 and Wounds.nerves == 0),  "   Spasms         Woth Flower          Flower Shaped Tart      Dacra's Dream'"
 
-puts "<output class=\"\" />"
+puts "<output class=\"\" />" if $frontend == "stormfront"

@@ -1,0 +1,39 @@
+if script.vars[1]
+    npc = GameObj.npcs[0].noun
+    put "get ##{script.vars[1]}"
+    put "give ##{script.vars[1]} to #{npc}"
+    while line = get
+        if line =~ /You have completed your training task./
+            move 'out'
+            exit
+        elsif line =~ /Lemme rearrange these|repetitions? remaining/
+            break
+        elsif line =~ /Nah, not that one/
+            exit
+        end
+    end
+end
+
+script.want_downstream = false
+script.want_downstream_xml = true
+
+options = {}
+
+5.times{
+    fput "get fifth lockpick from table"
+    fput "lm app my lockpick"
+    while line = get
+        if line =~ /^(?:.*>)?You examine the <a exist="(\d+)".*<\/a> very closely.\s+(.*)/
+            options[$1] = $2
+            break
+        end
+    end
+    waitrt?
+    fput "put lockpick on table"
+}
+
+respond "--------------------"
+ct = 0
+options.each{|id, message|
+    puts "<d cmd=\";applocks #{id}\">Lockpick #{ct+=1}</d> - #{message}"
+}

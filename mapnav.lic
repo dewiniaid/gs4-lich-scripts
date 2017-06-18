@@ -1,0 +1,128 @@
+=begin
+	Navigate and map areas that mapmap can't by moving the direction specified and recording the data.
+	
+	I primarily created this to map the area to Dragonspine Fane in Zul Logoth, as mapmap was getting confused by the staircases.
+
+	;mapnav help
+	;mapnav inspect 
+	;mapnav climb downward stairs
+
+	  author: LostRanger (thisgenericname@gmail.com)
+	    game: Gemstone
+	    tags: core
+	 version: 0.1.1
+	required: Lich >= 4.2.0
+
+	changelog:
+		0.1.1 (2017-04-17):
+			fixed 'save' not terminating script
+		0.1 (2017-04-17):
+			initial release
+=end
+
+command = script.vars[0].downcase
+
+if not command or command == "help"
+	if not command
+		echo "no command specified, showing help"
+	end
+		
+	# Code shamelessly plundered from mapmap
+	script_starter = "#{$lich_char}#{script.name}"
+	script_spacerr = ''.ljust(script_starter.length, ' ')
+	respond
+	respond "This script manually updates your local map database in a simple four-step process:"
+	respond "   1. Add the current room you're in (if it's not already in the DB)"
+	respond "   2. Perform the specified command (e.g. GO DOOR or NORTH)"
+	respond "   3. Add the room you arrive in (if it's not already in the DB)"
+	respond "   4. Update the appropriate movement information for the origin room."
+	respond ""
+	respond "The database will not be updated if the move command fails or you otherwise end up in the same room"
+	respond "that you started in."
+	respond
+	respond "Changes this script makes to your map database are not saved immediately.  Use #{script_starter} SAVE"
+	respond "or invoking another script that saves map changes (e.g. #{$lich_char}mapmap) will cause changes to be"
+	respond "saved."
+	
+	respond
+	respond "Usage:"
+	respond
+	respond "   #{script_starter} help       Shows this help text."
+	respond
+	respond "   #{script_starter} inspect    Inspect the current room."
+	respond
+	respond "   #{script_starter} create     Create current room in the map database if it doesn't exist, "
+	respond "   #{script_spacerr}            then inspect it."
+	respond
+	respond "   #{script_starter} save       Save the map database."
+	
+	respond
+	respond "   #{script_starter} MOVEMENT   Execute MOVEMENT (e.g. 'go doorway') and record the result."
+	respond
+	respond "This script is not foolproof."
+	respond
+	exit
+end
+
+if command == "inspect"
+	current = Room.current
+	if current.nil?
+		echo "no matching room found in DB"
+		exit
+	end
+	echo "showing details for room ##{current.id}"
+	respond current.inspect
+	exit
+end
+	
+if command == "create"
+	current = Room.current
+	if current.nil?
+		echo "no matching room found in DB, creating it"
+		current = Room.current_or_new
+	end
+	echo "showing details for room ##{current.id}"
+	respond current.inspect
+	exit
+end
+
+if command == "save"
+	Map.save
+	echo "map data saved"
+	exit
+end
+	
+is_direction = ["north","south","east","west","northeast","northwest","southeast","southwest","ne","nw","se","sw","out","up","down"].any?{ |dir| dir.start_with?(command) }
+is_go = command.start_with?("go ", "climb ", "swim ")
+if not (is_direction or is_go)
+	echo "suspicious command '#{command}'.  You might have meant '#{$lich_char}#{script.name} help'.  Trying your movement command anyways, use #{$lich_char}kill #{script.name} if navigation hangs..."
+end
+
+origin = Room.current_or_new
+origin_id = String(origin.id)
+move command
+destination = Room.current_or_new
+destination_id = String(destination.id)
+
+if destination_id == origin_id
+	echo "Destination room and origin room are the same (##{origin_id}).  Not recording navigation."
+	exit
+end
+
+
+old_wayto = origin.wayto[destination_id]
+if old_wayto == command
+	echo "'#{command}' from room ##{origin_id} already goes to ##{destination_id}, no changes made."
+	exit
+elsif old_wayto
+	echo "Replacing previous wayto '#{old_wayto}'"
+end
+	
+origin.wayto[destination_id] = command
+if origin.timeto[destination_id].nil?
+	origin.timeto[destination_id] = 0.2  # Seems to be a default, not entirely certain what it does (Maybe factor in RT?)
+end
+
+echo "'#{command}' from room ##{origin_id} now goes to ##{destination_id}."
+
+
