@@ -60,9 +60,13 @@
 	  tags: lockpicking
 	  required: Lich >= 4.6.0.
 
-  version: 0.7 (2017-05-13)
+  version: 0.8 (2017-06-21)
 
   changelog:
+    version 0.8 (2017-06-21)
+      * ;box disarm can now accept an item to hold while disarming (like a lockpick or knife)
+      * ;box return now stores the last used tool like other commands do.
+
     version 0.7 (2017-05-13)
       * Possible fix to an issue where lockpick messaging would not always end up in the lockpicking window, and would
         be duplicated in the story window instead (Stormfront Only)
@@ -149,7 +153,7 @@ end
 
 
 class BoxScript
-  VERSION = '0.7 (2017-05-13)'
+  VERSION = '0.8 (2017-06-21)'
   BOX_NOUNS = %w(box strongbox chest coffer trunk).to_set
   @script = nil
 
@@ -284,81 +288,86 @@ class BoxScript
   def help_command(args = nil)
     script = "#{$lich_char}#{@script.name}"
     spacer = ''.ljust(script.length, ' ')
-    respond "#{script} version #{VERSION}"
-    respond "Usage:"
-    respond
-    respond "   #{script} HELP                Shows this help text."
-    respond
-    respond "   #{script} EMPTY [<container>] Open the currently held box, gather the coins, and empty it into the specified"
-    respond "   #{spacer}                     container (or your default lootsack)"
-
-    respond "   #{script} GRAB [<container>]  Attempts to grab a closed (and presumably locked) box from the specified "
-    respond "   #{spacer}                     inventory container(s), or any inventory container if none are specified."
-    respond "   #{spacer}                     Separate multiple container names with commas or semicolons."
-
-    respond "   #{script} LIST [<container>]  List known boxes in the specifed containers(s), or all containers if no"
-    respond "   #{spacer}                     container is specified."
-    respond
-    respond "   #{script} STATUS              Shows your current lootsack and most recent customer."
-    respond
-    respond "   #{script} LOOTSACK [<cont>]   Sets/shows your current lootsack.  Note that this affects ALL Lich scripts."
-    respond
-    respond "   #{script} SCAN                LOOKs in all of your containers to attempt to force inventory information"
-    respond "   #{spacer}                     to refresh.  Use this if GRAB or LIST are acting up.  Will not examine"
-    respond "   #{spacer}                     closed containers, or containers that are in other containers."
-    respond
+    msg = []
+    msg << "#{script} version #{VERSION}"
+    msg << "Usage:"
+    msg << ''
+    msg << "   #{script} HELP                Shows this help text."
+    msg << ''
+    msg << "   #{script} EMPTY [<container>] Open the currently held box, gather the coins, and empty it into the specified"
+    msg << "   #{spacer}                     container (or your default lootsack)"
+    msg << ''
+    msg << "   #{script} GRAB [<container>]  Attempts to grab a closed (and presumably locked) box from the specified "
+    msg << "   #{spacer}                     inventory container(s), or any inventory container if none are specified."
+    msg << "   #{spacer}                     Separate multiple container names with commas or semicolons."
+    msg << ''
+    msg << "   #{script} LIST [<container>]  List known boxes in the specifed containers(s), or all containers if no"
+    msg << "   #{spacer}                     container is specified."
+    msg << ''
+    msg << "   #{script} STATUS              Shows your current lootsack and most recent customer."
+    msg << ''
+    msg << "   #{script} LOOTSACK [<cont>]   Sets/shows your current lootsack.  Note that this affects ALL Lich scripts."
+    msg << ''
+    msg << "   #{script} SCAN                LOOKs in all of your containers to attempt to force inventory information"
+    msg << "   #{spacer}                     to refresh.  Use this if GRAB or LIST are acting up.  Will not examine"
+    msg << "   #{spacer}                     closed containers, or containers that are in other containers."
+    msg << ''
 
     if is_locksmith? or args.downcase == 'full'
-      respond "   #{script} ACCEPT [WAIT]       ACCEPT an offer and remember who offered it.  If 'WAIT' is specified, will"
-      respond "   #{spacer}                     wait for an offer if one is not currently pending.  Items that do not look"
-      respond "   #{spacer}                     like boxes will not be automatically accepted."
-      respond
-      respond "   #{script} RETURN [<player>]   Return the box you recently accepted to whoever offered it to you, or to"
-      respond "   #{spacer}                     <player>"
-      respond
-      respond "   #{script} NEXT [<player>]     Same as doing '#{script} RETURN <player>' and '#{script} ACCEPT wait', in"
-      respond "   #{spacer}                     that order."
-      respond
-      respond "   #{script} DISARM or DETECT    Disarm the currently held box, whatever it happens to be named -- or detect"
-      respond "   #{spacer}                     traps without attempting to disarm."
-      respond
-      respond "   #{script} UNLOCK [<lockpick>] Unlock the currently held box using the specified lockpick (or the lockpick"
-      respond "   #{spacer}                     currently in your hands).  If <lockpick> consists of multiple words, this "
-      respond "   #{spacer}                     will try to find any lockpick with the same noun and any matching adjectives,"
-      respond "   #{spacer}                     even if those adjectives do not match what the game expects.  For instance, "
-      respond "   #{spacer}                     '#{script} vaalin lockpick' will grab 'a/dark vaalin/lockpick', even though"
-      respond "   #{spacer}                     you would normally need to type 'get my dark lockpick'."
-      respond
-      respond "   #{script} CALIPERS [<item>]   Set or show which calipers you are currently using."
-      respond
-      respond "   #{script} MEASURE             Measure the box you are holding with your calipers."
-      respond
-      respond "   #{script} CALIBRATE           Calibrate your calipers."
-      respond
-      respond "   #{script} DROP                Drop your box and return your current tool to where it came from."
-      respond
-      respond "   #{script} COMMAND             Shows or changes the current command used to pick boxes.  Useful for using"
-      respond "   #{spacer}                     lock mastery.  Type #{script} COMMAND by itself to see more details on this"
-      respond "   #{spacer}                     option."
-      respond
-      respond "   #{script} WINDOW [<option>]   Configures the lockpicking results window, where <option> is one of:"
-      respond "   #{spacer}                     OFF, ON, SAVE, CLEAR, or SHOW.  WINDOW by itself will show the current "
-      respond "   #{spacer}                     configuration.  Only available in StormFront.  EXPERIMENTAL."
-      respond
-      respond "#{script} remembers the last tool (lockpick or calipers) that it grabbed and the container that it came from."
-      respond "ACCEPT, NEXT, EMPTY, UNLOCK (if specifying a lockpick) and MEASURE will all return the tool to that same"
-      respond "container if you are still holding the tool and still wearing the container."
-      # respond
-      # respond "   #{script} PICKSACK [<cont>]   Sets/shows your preferred container to store lockpicks in.  Only affects"
-      # respond "   #{spacer}                     this script."
+      msg << "   #{script} ACCEPT [WAIT]       ACCEPT an offer and remember who offered it.  If 'WAIT' is specified, will"
+      msg << "   #{spacer}                     wait for an offer if one is not currently pending.  Items that do not look"
+      msg << "   #{spacer}                     like boxes will not be automatically accepted."
+      msg << ''
+      msg << "   #{script} RETURN [<player>]   Return the box you recently accepted to whoever offered it to you, or to"
+      msg << "   #{spacer}                     <player>"
+      msg << ''
+      msg << "   #{script} NEXT [<player>]     Same as doing '#{script} RETURN <player>' and '#{script} ACCEPT wait', in"
+      msg << "   #{spacer}                     that order."
+      msg << ''
+      msg << "   #{script} DETECT              Detect traps on the currently held box.  Does not attempt to disarm."
+      msg << ''
+      msg << "   #{script} DISARM [<tool>]     Detect or attempt to disarm the current box, optionally using the specified"
+      msg << "   #{spacer}                     tool.  (Specify a tool for traps that require a lockpick or knife to disarm.)"
+      msg << ''
+      msg << "   #{script} UNLOCK [<lockpick>] Unlock the currently held box using the specified lockpick (or the lockpick"
+      msg << "   #{spacer}                     currently in your hands).  If <lockpick> consists of multiple words, this "
+      msg << "   #{spacer}                     will try to find any lockpick with the same noun and any matching adjectives,"
+      msg << "   #{spacer}                     even if those adjectives do not match what the game expects.  For instance, "
+      msg << "   #{spacer}                     '#{script} vaalin lockpick' will grab 'a/dark vaalin/lockpick', even though"
+      msg << "   #{spacer}                     you would normally need to type 'get my dark lockpick'."
+      msg << ''
+      msg << "   #{script} CALIPERS [<item>]   Set or show which calipers you are currently using."
+      msg << ''
+      msg << "   #{script} MEASURE             Measure the box you are holding with your calipers."
+      msg << ''
+      msg << "   #{script} CALIBRATE           Calibrate your calipers."
+      msg << ''
+      msg << "   #{script} DROP                Drop your box and return your current tool to where it came from."
+      msg << ''
+      msg << "   #{script} COMMAND             Shows or changes the current command used to pick boxes.  Useful for using"
+      msg << "   #{spacer}                     lock mastery.  Type #{script} COMMAND by itself to see more details on this"
+      msg << "   #{spacer}                     option."
+      msg << ''
+      msg << "   #{script} WINDOW [<option>]   Configures the lockpicking results window, where <option> is one of:"
+      msg << "   #{spacer}                     OFF, ON, SAVE, CLEAR, or SHOW.  WINDOW by itself will show the current "
+      msg << "   #{spacer}                     configuration.  Only available in StormFront.  EXPERIMENTAL."
+      msg << ''
+      msg << "#{script} remembers the last tool (lockpick or calipers) that it grabbed and the container that it came from."
+      msg << "ACCEPT, NEXT, EMPTY, UNLOCK (if specifying a lockpick) and MEASURE will all return the tool to that same"
+      msg << "container if you are still holding the tool and still wearing the container."
+      # msg <<
+      # msg << "   #{script} PICKSACK [<cont>]   Sets/shows your preferred container to store lockpicks in.  Only affects"
+      # msg << "   #{spacer}                     this script."
     else
-      respond "The above options are most useful for all characters.  For commands primarily of interest to those who"
-      respond "are opening boxes, see #{script} HELP FULL."
-      respond "[Rogues and characters with at least one rank of Lockpicking or Disarming will always see the full help]"
+      msg << "The above options are most useful for all characters.  For commands primarily of interest to those who"
+      msg << "are opening boxes, see #{script} HELP FULL."
+      msg << "[Rogues and characters with at least one rank of Lockpicking or Disarming will always see the full help]"
     end
-    respond
-    respond "This script is oblivious to items that are in closed containers."
-    respond
+    msg << ''
+    msg << "This script is oblivious to items that are in closed containers."
+    msg << ''
+
+    respond msg.join("\n")
 
     status_command
   end
@@ -403,11 +412,11 @@ class BoxScript
     end
   end
 
-  def accept_command(args)
+  def accept_command(args, store=true)
     @script.want_downstream = true
     @script.want_downstream_xml = false
 
-    store_tool
+    store_tool if store
     wait = false
     waiting = false
     if args
@@ -478,6 +487,7 @@ class BoxScript
   end
 
   def return_command(name = nil)
+    store_tool
     unless CharSettings['customer']
       echo "I don't have anybody to return something to."
       return
@@ -495,7 +505,7 @@ class BoxScript
       return
     end
     return_command(name)
-    accept_command('wait')
+    accept_command('wait', false)
   end
 
 
@@ -617,6 +627,32 @@ class BoxScript
       echo "You don't appear to have a box in your hands."
       return
     end
+    if GameObj.right_hand and GameObj.right_hand.noun == box.noun
+      other_hand = GameObj.left_hand
+    else
+      other_hand = GameObj.right_hand
+    end
+    if args
+      tool, container_id = find_item_anywhere(args)
+      unless tool
+        echo 'Could not find that tool.'
+        return
+      end
+      if container_id
+        if other_hand.id
+          unless can_store_tool
+            echo 'Your hands appear to be full.'
+            return
+          end
+          store_tool
+        end
+        fput "get ##{tool.id}"
+        wait_until{GameObj.right_hand.id == tool.id or GameObj.left_hand.id == tool.id}
+        $_box_script_status[:lasttool] = tool.id
+        $_box_script_status[:lastcontainer] = container_id
+      end
+    end
+
     checknewbox(box)
     waitrt?
     start_capture("<a exist=\"#{box.id}\"")
