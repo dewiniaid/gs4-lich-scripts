@@ -60,7 +60,8 @@
 	  tags: lockpicking
 	  required: Lich >= 4.6.0.
 
-  version: 0.8 (2017-06-21)
+  version: 0.8.1 (2017-06-23)
+      * Improved performance of ;box empty so that it should no longer fail the second part while in RT.
 
   changelog:
     version 0.8 (2017-06-21)
@@ -153,7 +154,7 @@ end
 
 
 class BoxScript
-  VERSION = '0.8 (2017-06-21)'
+  VERSION = '0.8.1 (2017-06-23)'
   BOX_NOUNS = %w(box strongbox chest coffer trunk).to_set
   @script = nil
 
@@ -955,6 +956,8 @@ class BoxScript
     fput "open ##{box.id}" if box.contents == nil
     fput "look in ##{box.id}"
     fput "get coins from ##{box.id}"
+    waitfor 'You gather', 'Get what?'
+    waitfor '<prompt'
     waitrt?
     fput "empty ##{box.id} into #{args}"
     waitrt?

@@ -1,0 +1,674 @@
+=begin
+  Executes a series of commands for each item matching the criteria you specify.
+
+  Some examples:
+    ;foreach box in inv; move to locker
+    ;foreach box in locker; move to backpack
+    ;foreach gem in cloak; get item; appraise item; put item in container
+    ;foreach gem in red sack; move to gemcutter; turn gemcutter; move to blue sack
+    ;foreach scroll in inv; read item
+    ;foreach gem in backpack; get item; prep 704; cast item; put item in container   (Note: won't check mana)
+    ;foreach reagent in inv; get item; sell item
+    ;foreach gem in backpack; get item; ;my_script item; put item in container
+    ;foreach name=*quartz orb in inv; get item; put item in locker
+
+  Basic usage:
+    ;foreach [[ATTRIBUTE]=VALUE] in <CONTAINER>[; command; command; ...]
+
+  Type ;foreach or ;foreach help for more details and information on functionality.
+
+  ;foreach is blind to closed containers.
+
+	  author: LostRanger (thisgenericname@gmail.com)
+	  game: any
+	  tags: utility
+	  required: Lich >= 4.6.0.
+
+  version: 0.5 (2017-06-24)
+
+  changelog:
+    version 0.5 (2017-06-23)
+      * `;foreach in inventory` now uses and parses INV FULL rather than the tedious scanning process and relying on
+        Lich's container management.  This is MUCH faster than the old approach.
+      * You can now use t=, n= and m= as shorthand for 'type', 'noun=' and 'name=', respectively
+      * Added fullname= and f= to matches an item's FULL name.  (This was actually an unadvertised addition in an
+          earlier update)
+      * You can now filter on multiple values (;foreach noun=diamond,emerald,sapphire in ...)
+      * MOVE TO container  and  MOVE ITEM TO container will no longer attempt to get the item first if you're already
+          holding it.
+      * MOVE TO GROUND/FLOOR and MOVE ITEM TO GROUND/FLOOR will now place items on the ground.
+      * Added GIVEITEM [TO] <player> command, which gives the matched item to a player and waits for them to accept.
+          Roughly a shortcut for 'give item to player; waitfor player has accepted'
+      * Added RETURN, which returns the item to its original container (or the floor) if you are still holding it
+      * DROP, PLACE, SELL and APPRAISE will now expand to DROP ITEM, PLACE ITEM, SELL ITEM and APPRAISE ITEM
+          respectively.
+      * DROP ITEM, PLACE ITEM, SELL ITEM, APPRAISE ITEM, GIVEITEM will now GET the item first if they are the first
+          command in the list.
+      * APPRAISE ITEM will return the item to its orginal container if it is the only command.
+
+    version 0.4.3 (2017-06-23)
+      * Added MV shortcut for MOVE
+      * Added FASTMOVE, FMV and FASTMV which are slightly faster methods for moving items but may be a bit fragile.
+
+    version 0.4.2 (2017-06-23)
+      * Support negative container IDs.  Allows use on pawnshop tables, among other things.
+
+    version 0.4.1 (2017-06-21)
+      * Cosmetic fixes to help messaging.
+
+    version 0.4 (2017-06-21)
+      * Add PAUSE command, which announces the current item and then pauses the script.  Unpausing the script picks up
+          where it left off.
+      * Added a safeguard against operating against every single item in your inventory.
+      * Added foreach in last;... which operates against the same set of items the last copy of the script found.
+          Handy if you want to e.g. undo moving items, and the list can be additionally filtered as well.
+      * Added prettier formatting for Stormfront users.
+      * Item lists now include links for Stormfront users.
+      * When scanning a large number of containers, make periodic progress updates.
+      * When processing a large number of items, make periodic progress updates.
+      * Fix a cosmetic bug where container scanning might cause excessive amounts of blank lines to be sent to the client.
+
+    version 0.3.1 (2017-06-20)
+      * Actually re-enable code disabled by accident in 0.3.  So foreach actually works again.
+
+    version 0.3 (2017-06-20)
+      * Added convenience shortcut commands MOVE, WAITRT, WAITFOR, WAITRE, and ECHO.  See help for examples.
+        Example of move: ;foreach item in loot;move to backpack
+
+    version 0.2.1 (2017-06-19)
+      * Fix 'on ground/on floor', and add 'room' as an alias
+
+    version 0.2 (2017-06-19)
+      * Add support for invoking Lich scripts.  (foreach gem in inv;;script item)
+      * Add improvements to handling commands that create Roundtime.
+      * Using foreach with no commands now produces a somewhat better inventory list.
+      * Minor text fixes.
+
+    version 0.1 (2017-06-18)
+      * Initial release
+=end
+
+module ForeachScript
+    VERSION = '0.4.2 (2017-06-23)'
+    COMMAND_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
+    INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|There is nothing [io]n there|That is closed.|I could not find what you were referring to\./
+    HOOK = 'foreach_script_temp_hook'
+
+    INVFULL_PATTERN = /^( {2,})([^<]*)<a exist="(-?\d+)" noun="([^"]*)">([^<]*)<\/a>(?: ([^(]*)(?:$|(?= \()))?(?: (\(.*\)))?$/
+    # Matches: 1 = leading space, 2 = prename, 3 = id, 4 = noun, 5 = name, 6 = postname, 7 = registered/marked attributes
+    # You are carrying nothing at this time.  -- no inventory
+
+    CONTAINER_UPDATE_INTERVAL = 10  # How often do we notify how many more containers are being scanned
+    ITEM_UPDATE_INTERVAL = 10  # How often do we notify how many more items are being processed?
+
+    @previous = nil unless defined?(@previous)
+    @previous_names = nil unless defined?(@previous_names)
+
+    def self.anon_hook(prefix = '')
+        now = Time.now
+        "Foreach::#{prefix}-#{now.tv_sec}.#{now.tv_usec}-#{Random.rand(10000)}"
+    end
+
+    def self.cleanup
+        [DownstreamHook, UpstreamHook].each{|provider|
+            provider.list.find_all{|name| name.start_with?('Foreach::')}.each{|name| provider.remove(name)}
+        }
+    end
+
+    def self.show_help(full)
+        msg = []
+        name = "#{$lich_char}#{@script.name}"
+        msg << "**This is ForEach version #{VERSION}**"
+        msg << "**Usage:**"
+        msg << "    #{name} [[ATTRIBUTE=]VALUE] in <CONTAINER>[; command; command; ...]"
+        msg << ''
+        msg << "**ATTRIBUTE** can be one of: noun, name, or type.  If unspecified, it is type."
+        msg << "**VALUE** is what the attribute's value must match.  Wildcards (with *) are supported."
+        msg << "**CONTAINER** can be a name of a container or one of the following:"
+        msg << ''
+        msg << "    **INV** or **INVENTORY**  - Contents of all containers in your inventory."
+        msg << "    **WORN**              - All worn items in your inventory."
+        msg << "    **FLOOR/GROUND/ROOM** - Items in the room.  (Not their contents)"
+        msg << "    **LOCKER** or **LOOT**    - Contents of items in the room.  (e.g. locker containers)"
+        msg << "    **PREVIOUS** or **LAST**  - All items that matched the previous run of Foreach."
+        msg << ''
+        msg << "Each command will be executed on the item in sequence.  Within each command, the following replacements will be be made:"
+        msg << ''
+        msg << "    **ITEM**      - An exact reference to the item."
+        msg << "    **NAME**      - The full name of the item.  Not suitable for commands, suitable for speech."
+        msg << "    **NOUN**      - The item's noun.  Not suitable for commands, suitable for speech."
+        msg << "    **CONTAINER** - An exact reference to the container the item was found in.  Not if using FLOOR/GROUND."
+        msg << "                If using PREVIOUS, this is the container the item WAS in, not its current location."
+        msg << ''
+        msg << "If no commands are specified, #{name} will show a list of all matching items instead."
+        msg << "This list will show item types, so '#{name} in backpack' can help you determine which item type to use."
+        msg << ''
+        msg << "If no attribute or value are specified, #{name} examines all items in the relevant locations."
+        msg << ''
+        msg << "Each command can be a game command, a lich script (invoked as if typing it in the client), or one of the following"
+        msg << "convenience commands:"
+        msg << ''
+        msg << "    **ECHO <message>**               - Echo a line of text."
+        msg << "    **MOVE [<item>] TO <container>** - Convenience shortcut for 'get item; put item in container"
+        msg << "    **PAUSE**                        - Pause the script.  #{name} will resume where it left off when unpaused."
+        msg << "    **WAITRT**                       - Wait for roundtime to finish.  Hangs if not in roundtime."
+        msg << "    **WAITFOR <phrase>**             - Waits to see the specified phrase.  Case insensitive."
+        msg << "    **WAITRE <pattern>**             - Waits to see the specified regular expression."
+        msg << ''
+        msg << "#{name} is blind to closed containers."
+        msg << ''
+        msg << "If #{name} is trusted ('#{$lich_char}trust #{@script.name}'), its initial inventory scan output will be silenced."
+        msg << ''
+        msg << "Item types are based on Lich's definition of item types, also seen in #{$lich_char}sorter.  The current list is:"
+        msg << GameObj.type_data.map{|k,v| k}.sort.join(', ')
+        msg = msg.join("\n")
+
+        if @stormfront
+            msg = REXML::Text.new(msg, respect_whitespace: true).to_s
+            msg.gsub!(/\*\*(.*?)\*\*/, '<preset id="whisper">\1</preset>')
+            puts "<output class=\"mono\" />\n#{msg}\n<output class=\"\" />"
+        else
+            msg.gsub!('**', '')
+            respond msg
+        end
+    end
+
+    def self.quiet_command(command, start_pattern, end_pattern = /<prompt/, include_end = true, timeout=5)
+        hook = self.mask_output(start_pattern, end_pattern, include_end)
+        xml = dothistimeout(command, timeout, start_pattern)
+        unless xml
+            DownstreamHook.remove(hook)
+            return nil
+        end
+        result = [xml]
+        while true
+            xml = get
+            if xml =~ end_pattern
+                result << xml if include_end
+                return result
+            end
+            result << xml
+        end
+    end
+
+    def self.mask_output(start_pattern, end_pattern = /<prompt/, include_end = true)
+        filter = false
+        name = self.anon_hook
+        DownstreamHook.add(name, proc {|xml|
+            if filter
+                if xml =~ end_pattern
+                    DownstreamHook.remove(name)
+                    filter = false
+                    next(include_end ? nil : xml)
+                else
+                    next(nil)
+                end
+            elsif xml =~ start_pattern
+                filter = true
+                next(nil)
+            else
+                xml
+            end
+        })
+        return name
+    end
+
+    def self.quiet_inv_scan_hook(xml)
+        (xml =~ INV_PATTERN or xml =~ /^<prompt/ or xml =~ /^\s*$/) ? nil : xml
+    end
+
+    def self.stop_scripts
+        ['sorter'].each{|s|
+            if Script.running?(s)
+                Script.kill(s)
+                @stopped_scripts << s
+            end
+        }
+    end
+
+    def self.resume_scripts
+        @stopped_scripts.each{|s| Script.start(s) }
+        @stopped_scripts = []
+    end
+
+    def self.holding?(id)
+        id == GameObj.right_hand.id or id == GameObj.left_hand.id
+    end
+
+    def self.run(script)
+        @stormfront = ($frontend == 'stormfront')
+        @profanity = ($frontend == 'profanity')
+        @script = script
+        @script.want_downstream = false
+        @script.want_downstream_xml = true
+        @stopped_scripts = []
+        before_dying {
+            self.cleanup
+            resume_scripts
+        }
+
+        instruction, *commands = @script.vars[0].strip.split(/\s*;\s*/)
+
+        # Since ; is our separator, and is also the default lich character, treat an 'empty' command as an invocation
+        # of a lich script  because (;foreach ...; ;script) will become ["foreach...", "", "script"]
+        if $lich_char == ';' and commands.length > 0
+            while ix = commands.find_index('')
+                while commands[ix+1] == ''
+                    commands.delete_at(ix+1)
+                end
+                commands[ix+1] = "#{$lich_char}#{commands[ix+1]}" if commands[ix+1]
+                commands.delete_at(ix)
+            end
+        end
+
+        unless instruction =~ COMMAND_PATTERN
+            self.show_help((instruction =~ /^help$/i) ? true : false)
+            exit
+        end
+
+        filter = nil
+        attribute = ($1.downcase or 'type')
+        value = $2
+        location = ($3 or $4)
+        target = $5
+        explicit_all = false  # Safety bypass.
+
+        if attribute == 'type' and value =~ /all|any|everything/i
+            explicit_all = true
+            attribute = nil
+            value = nil
+        end
+
+        if value
+            alternatives = value.split(/\s*,\s*/)
+            pattern = /^(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})$/
+            # alternatives.map!{|x| "(?:^#{Regexp::escape(x).gsub('\*', '.*')}$"}
+            # pattern = /^#{Regexp::escape(value).gsub('\*', '.*')}$/i
+            case attribute
+                when 'type', 't'
+                    unless GameObj.type_data.find{|k,v| k.split(',').find{|t| t =~ pattern}}
+                        echo "No item types match the pattern '#{value}'.  Did you perhaps mean '#{$lich_char}#{@script.name} #{value =~ /\s/ ? 'name' : 'noun'}=#{value} in #{target};...'?"
+                        echo "Type '#{$lich_char}#{@script.name}' by itself for more options and a list of item types."
+                        exit
+                    end
+
+                    filter = proc {|item| item.type.split(',').find{|t| t =~ pattern}}
+                when 'name', 'm'
+                    filter = proc {|item| item.name =~ pattern}
+                when 'fullname', 'f'
+                    filter = proc {|item| item.full_name =~ pattern}
+                when 'noun', 'n'
+                    filter = proc {|item| item.noun =~ pattern}
+                else
+                    echo "Unknown attribute '#{attribute}'"
+                    exit
+            end
+        else
+            filter = proc {|item| true}
+        end
+
+        # Handle command extensions
+        new_commands = []
+        commands.each_with_index{|command, ix|
+            if command =~ /^(drop|place|sell|appraise)$/i
+                command = "#{$1} item"
+            end
+            if ix == 0 and command =~ /^(drop|place|sell|app(?:raise))?\s+item$/i
+                if target =~ /^worn$/
+                    new_commands << 'remove item'
+                else
+                    new_commands << 'get item'
+                end
+            end
+            new_commands << command
+            if commands.length == 1 and command =~ /^app(?:raise)?\s+item$/i
+                new_commands << 'return'
+            end
+        }
+        commands = new_commands
+
+        # echo commands.inspect
+        # exit
+        #
+        # Find possible item IDs
+        to_scan  = []
+        to_filter = {}
+        container_names = {nil => 'On the ground'}
+        silence_me if $SAFE == 0
+        if target =~ /^inv(?:entory)?$/i
+            if commands.length > 0 and value.nil?
+                echo 'WARNING: THIS COMMAND WILL EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
+                if explicit_all
+                    echo "'#{$lich_char}kill #{@script.name}' to abort!"
+                    sleep 0.5  # A moment before it all scrolls off
+                else
+                    echo "If you REALLY want to do this, you must explicitly say so by using '#{$lich_char}#{@script.name} ALL in #{target}';..."
+                    exit
+                end
+            end
+
+
+            # data = self.quiet_command('inv containers', /You are wearing .*<a exist="/)[0]
+            # unless data
+            #     echo "Failed to retrieve inventory containers."
+            #     exit
+            # end
+            # data.scan(/(?:<a exist="(\d+)")+/).each{|match|
+            #     id = match[0]
+            #     to_scan << id
+            #     container_names[id] = GameObj.inv.find{|item| item.id == id}.full_name
+            # }
+
+            data = self.quiet_command(
+                'inv full',
+                /^(?:You are carrying nothing at this time|You are currently wearing and carrying)/,
+                # /^(?:You are carrying nothing at this time|\(\d+ items? displayed.\))/,
+                /<prompt/,
+                true,
+                5
+            )
+            unless data
+                echo "Inventory request timed out."
+                exit
+            end
+            last_container = nil
+            last_container_name = nil
+            data.each{|xml|
+                next unless xml =~ INVFULL_PATTERN
+                # echo $~.inspect
+                case $1.length
+                    when 2
+                        last_container = $3
+                        last_container_name = $5
+                    when 6
+                        unless last_container
+                            echo "I found an item in a container before I found my first container.  This shouldn't happen."
+                            echo "Please save a copy of INV FULL and contact LostRanger"
+                            exit
+                        end
+                        item = GameObj.new($3, $4, $5, $2, $6)
+                        unless to_filter[last_container]
+                            to_filter[last_container] = []
+                            container_names[last_container] = last_container_name
+                        end
+                        to_filter[last_container] << item
+                    else
+                        nil  # noop
+                end
+            }
+        elsif target =~ /^(?:prev(?:ious)?|last)$/i
+            unless @previous
+                echo "No previous run data is available."
+                exit
+            end
+            to_filter = @previous
+            container_names = @previous_names
+        elsif target =~ /^(?:loot|locker)$/i
+            to_scan = GameObj.loot.map{|item| item.id}
+            GameObj.loot.each{|item| container_names[item.id] = item.full_name}
+        elsif target =~ /^(?:floor|ground|room)$/i
+            to_filter[nil] = GameObj.loot
+        elsif target =~ /^worn$/i
+            to_filter[nil] = GameObj.inv
+            container_names[nil] = 'On your person'
+        else
+            stop_scripts
+            xml = dothistimeout("look #{location} #{target}", 5, INV_PATTERN)
+            unless xml =~ INV_PATTERN
+                echo "Timed out waiting for inventory command."
+                exit
+            end
+            unless $1
+                echo "Error locating item or item inventory."
+                exit
+            end
+            unless GameObj.containers[$1]
+                echo "Error loading item inventory."
+                exit
+            end
+            to_filter[$1] = GameObj.containers[$1]
+            container_names[$1] = $2
+        end
+
+        if to_scan.length > 0
+            stop_scripts
+            remaining = to_scan.length
+            echo "Scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
+            # echo 'Scanning inventory...' if $SAFE == 0
+            hook = self.anon_hook
+            DownstreamHook.add(hook, proc {|xml| self.quiet_inv_scan_hook(xml)})
+            to_scan.each{|exist|
+                if remaining != to_scan.length and remaining % CONTAINER_UPDATE_INTERVAL == 0
+                    echo "Still scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
+                end
+                remaining -= 1
+                fput "look #{location} ##{exist}" }
+            waitfor '<prompt'
+            DownstreamHook.remove(hook)
+            to_scan.each{|exist|
+                to_filter[exist] = GameObj.containers[exist]
+            }
+        end
+
+        resume_scripts
+        silence_me if $SAFE == 0
+
+        total_items = 0
+        filtered = {}
+        to_filter.each{|container, items|
+            unless items.length > 0
+                container_names.delete(container)
+                next
+            end
+            items = items.find_all{|item| filter.call(item)}
+            unless items.length > 0
+                container_names.delete(container)
+                next
+            end
+            total_items += items.length
+            filtered[container] = items
+        }
+
+        if total_items == 0
+            echo 'No matching items found!'
+            exit
+        end
+
+        @previous = filtered
+        @previous_names = container_names
+
+        before_next = nil  # Possibly skippable things to do before the next command.
+
+        processed_items = 0
+        filtered.each{|container, items|
+            # next unless items.length > 0
+            # items = items.find_all{|item| filter.call(item)}
+            # next unless items.length > 0
+            if commands.length > 0
+                items.each{|item|
+                    ref = "##{item.id}"
+                    if processed_items % ITEM_UPDATE_INTERVAL == 0
+                        percent = (100.0 * processed_items / total_items).to_i
+                        echo "Item #{processed_items + 1} of #{total_items}.  (#{percent}% complete)"
+                    end
+                    commands.each{|command, ix|
+                        command = (
+                            command
+                            .gsub(/\bitem\b/i, ref)
+                            .gsub(/\bnoun\b/i, item.noun)
+                            .gsub(/\bname\b/i, item.name)
+                            .gsub(/\bcontainer\b/i, ("##{container}"))
+                        )
+                        if command.start_with?($lich_char)
+                            before_next.call if before_next
+                            before_next = proc { waitrt? }
+                            scriptname, args = command.split(/\s+/, 2)
+                            scriptname = scriptname[1..-1]
+                            echo "Running #{$lich_char}#{scriptname} #{args}"
+                            Script.run(scriptname, args)
+                        elsif command =~ /^(f(?:ast)?)?(?:move|mv)\s+(?:(.+)\s+)?to\s+(.*)$/i
+                            before_next.call if before_next
+                            before_next = nil
+                            fast = $1 ? true : false
+                            what = ($2 or ref)
+                            where = $3
+                            holding = (what == ref and self.holding?(item.id))
+
+                            get_command = "get #{what}"
+                            put_command = (where =~ /^(?:ground|floor)$/i) ? "place #{what}" : "put #{what} in #{where}"
+
+                            unless holding
+                                if fast
+                                    put get_command
+                                else
+                                    fput get_command
+                                end
+                            end
+                            if fast
+                                put put_command
+                                # waitfor '<right>', '<left>' unless holding
+                                waitfor '<right>', '<left>'
+                            else
+                                fput put_command
+                            end
+                            #
+                            #
+                            #
+                            #
+                            #     fput "get #{what}" unless what == ref and self.holding?(item.id)
+                            #     waitfor '<right>', '<left>'
+                            # end
+                            # if where =~ /^(?:ground|floor)$/i
+                            #     fput "place #{what}"
+                            # else
+                            #     fput "put #{what} in #{where}"
+                            # end
+                            # waitfor '<right>', '<left>'
+                        # elsif command =~ /^f(?:ast)?(?:move|mv)\s+(?:(.+)\s+)?to\s+(.*)$/i
+                        #     before_next.call if before_next
+                        #     before_next = nil
+                        #     what = ($1 or ref)
+                        #     where = $2
+                        #     holding = (what == ref and self.holding?(item.id))
+                        #     put "get #{what}" unless holding
+                        #     put "put #{what} in #{where}"
+                        #     waitfor '<right>', '<left>' unless holding
+                        #     waitfor '<right>', '<left>'
+                        elsif command =~ /^echo (.*)$/i
+                            before_next.call if before_next
+                            before_next = nil
+                            echo $1
+                        elsif command =~ /^waitrt$/i
+                            before_next = nil
+                            waitrt
+                        elsif command =~ /^waitfor (.*)$/i
+                            script.want_downstream = true
+                            script.want_downstream_xml = false
+                            waitfor $1
+                            before_next = proc { waitrt? }
+                            script.want_downstream_xml = true
+                            script.want_downstream = false
+                        elsif command =~ /^waitre (.*)$/i
+                            text = $1
+                            flags = nil
+                            if text =~ /\/(.+)\/(.*)$/
+                                text = $1
+                                flags = $2 unless $2 == ''
+                            end
+                            pattern = Regexp::new(text, flags)
+                            nil until get =~ pattern
+                            before_next = proc { waitrt? }
+                        elsif command =~ /^pause$/i
+                            percent = (100.0 * processed_items / total_items).to_i
+                            msg = []
+                            msg << '<output class="mono" />' if $stormfront
+                            msg << "[#{@script.name}: Pausing at #{self.item_detail(item)},  (#{processed_items + 1} of #{total_items}, #{percent}% complete)."
+                            msg << '<output class="" />' if $stormfront
+                            puts msg.join("\n")
+                            pause_script
+                            before_next = proc { waitrt? }
+                        elsif command =~ /^giveitem(?:\s+(?:to\s+)?(.+))?$/i
+                            before_next.call if before_next
+                            before_next = nil
+                            unless $1
+                                echo 'Give to whom?'
+                                exit
+                            end
+                            fput "give ##{item.id}"
+                            script.want_downstream = true
+                            script.want_downstream_xml = false
+                            waitfor /^#{$1} has accepted your offer/
+                            script.want_downstream_xml = true
+                            script.want_downstream = false
+                        elsif command =~ /^return(?:\s+item)?$/i
+                            before_next.call if before_next
+                            before_next = nil
+                            if container
+                                fput "put #{ref} in ##{container}"
+                            elsif target =~ /^worn$/i
+                                fput "wear #{ref}"
+                            else
+                                fput "place #{ref}"
+                            end
+                            #     waitfor '<right>', '<left>'  # Wait for a hand change.
+                            # end
+                        else
+                            before_next.call if before_next
+                            before_next = proc { waitrt? }
+                            fput command
+                            before_next = proc { waitfor '<prompt'; waitrt? }
+                        end
+                    }
+                    processed_items += 1
+                }
+            else
+                msg = ['']
+                header = "[#{container_names[container]}]: "
+                if @stormfront
+                    header = REXML::Text.new(header).to_s
+                    msg << "<preset id=\"whisper\">#{header}</preset>"
+                else
+                    header = REXML::Text.new(header).to_s if @profanity
+                    msg << monsterbold_start + header + monsterbold_end
+                end
+                items.each{|item|
+                    msg << item_detail(item)
+                }
+                puts msg.join("\n")
+            end
+        }
+        if commands.length == 0
+            puts "\nTotal items: #{total_items}"
+        end
+    end
+
+    def self.item_detail(item)
+        if @stormfront
+            noun = REXML::Text.new(item.noun).to_s
+            text = REXML::Text.new("#{item.full_name} (#{item.type})").to_s
+            return "<a exist=\"#{item.id}\" noun=\"#{noun}\">##{item.id}</a> #{text}"
+        else
+            text = "##{item.id} #{item.full_name} (#{item.type})"
+            return REXML::Text.new(text).to_s if @profanity
+            return text
+        end
+    end
+end
+
+if defined?(GameObj.type_data)
+    GameObj.load_data if GameObj.type_data.empty? or GameObj.type_data.nil?
+    if GameObj.type_data.nil?
+        wait_while { running?('updater') }
+        wait_while { running?('repository') }
+        start_script 'repository', [ 'download', 'gameobj-data.xml' ]
+        wait_while { running?('repository') }
+        wait_while { running?('updater') }
+        start_script 'updater', [ 'add', 'gameobj-data.xml' ]
+        wait_while { running?('updater') }
+        GameObj.load_data
+        exit if GameObj.type_data.nil?
+    end
+end
+
+
+ForeachScript.run(script)

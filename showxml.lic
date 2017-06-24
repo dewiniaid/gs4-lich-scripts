@@ -4,9 +4,11 @@
 
 	 author: LostRanger (thisgenericname@gmail.com)
 	   game: any
-  version: 0.1 (2017-05-07)
+  version: 0.2 (2017-06-24)
 
   changelog:
+    0.2 (2017-05-07):
+      * avoid whitespace collapse in ShowXML window.
     0.1 (2017-05-07):
       * initial release
 =end
@@ -17,7 +19,7 @@ unless defined?(script.want_script_output)
 end
 
 class ShowXMLScript
-	VERSION = '0.1 (2017-05-07)'
+	VERSION = '0.2 (2017-06-24)'
 
 	BOOLEAN_MAP = {
 			'yes' => true, 'true' => true, 'on' => true, '1' => true,
@@ -199,7 +201,7 @@ class ShowXMLScript
 
 		while true
 			source, message = @output.pop
-			output = REXML::Text.new(message).to_s
+			output = REXML::Text.new(message, respect_whitespace: true).to_s
 			if source == :client
 				if exit_command and exit_command == message
 					break
