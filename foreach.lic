@@ -15,7 +15,8 @@
   Basic usage:
     ;foreach [[ATTRIBUTE]=VALUE] in <CONTAINER>[; command; command; ...]
 
-  Type ;foreach or ;foreach help for more details and information on functionality.
+  Type ;foreach or ;foreach help for more details and information on functionality, or visit:
+  https://github.com/dewiniaid/gs4-lich-scripts/blob/master/Foreach.md
 
   ;foreach is blind to closed containers.
 
@@ -45,6 +46,7 @@
       * DROP ITEM, PLACE ITEM, SELL ITEM, APPRAISE ITEM, GIVEITEM will now GET the item first if they are the first
           command in the list.
       * APPRAISE ITEM will return the item to its orginal container if it is the only command.
+      * Overhauled documentation, including a link to web-viewable documentation
 
     version 0.4.3 (2017-06-23)
       * Added MV shortcut for MOVE
@@ -89,7 +91,7 @@
 =end
 
 module ForeachScript
-    VERSION = '0.4.2 (2017-06-23)'
+    VERSION = '0.5 (2017-06-24)'
     COMMAND_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
     INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|There is nothing [io]n there|That is closed.|I could not find what you were referring to\./
     HOOK = 'foreach_script_temp_hook'
@@ -120,47 +122,65 @@ module ForeachScript
         name = "#{$lich_char}#{@script.name}"
         msg << "**This is ForEach version #{VERSION}**"
         msg << "**Usage:**"
-        msg << "    #{name} [[ATTRIBUTE=]VALUE] in <CONTAINER>[; command; command; ...]"
+        msg << "    #{name} [[ATTRIBUTE=]VALUE] in <TARGET>[; command; command; ...]"
         msg << ''
-        msg << "**ATTRIBUTE** can be one of: noun, name, or type.  If unspecified, it is type."
-        msg << "**VALUE** is what the attribute's value must match.  Wildcards (with *) are supported."
-        msg << "**CONTAINER** can be a name of a container or one of the following:"
+        if full
+            msg << "**ATTRIBUTE** can be one of: noun, name, or type.  If unspecified, it is type."
+            msg << "**VALUE** is what the attribute's value must match.  Wildcards (with *) are supported."
+            msg << "**TARGET** can be a name of a container or one of the following:"
+            msg << ''
+            msg << "    **INV** or **INVENTORY**  - Contents of all containers in your inventory."
+            msg << "    **WORN**              - All worn items in your inventory."
+            msg << "    **FLOOR/GROUND/ROOM** - Items in the room.  (Not their contents)"
+            msg << "    **LOCKER** or **LOOT**    - Contents of items in the room.  (e.g. locker containers)"
+            msg << "    **PREVIOUS** or **LAST**  - All items that matched the previous run of Foreach."
+            msg << ''
+            msg << "Each command will be executed on the item in sequence.  Within each command, the following replacements will be be made:"
+            msg << ''
+            msg << "    **ITEM**      - An exact reference to the item."
+            msg << "    **NAME**      - The full name of the item.  Not suitable for commands, suitable for speech."
+            msg << "    **NOUN**      - The item's noun.  Not suitable for commands, suitable for speech."
+            msg << "    **CONTAINER** - An exact reference to the container the item was found in.  Not if using FLOOR/GROUND."
+            msg << "                If using PREVIOUS, this is the container the item WAS in, not its current location."
+            msg << ''
+            msg << "If no commands are specified, #{name} will show a list of all matching items instead."
+            msg << "This list will show item types, so '#{name} in backpack' can help you determine which item type to use."
+            msg << ''
+            msg << "If no attribute or value are specified, #{name} examines all items in the relevant locations."
+            msg << ''
+            msg << "Each command can be a game command, a lich script (invoked as if typing it in the client), or one of the following"
+            msg << "convenience commands:"
+            msg << ''
+            msg << "    **ECHO <message>**               - Echo a line of text."
+            msg << "    **GIVEITEM <player>**            - Give an item to a player and wait for them to accept it."
+            msg << "    **[FAST]MOVE [<item>] TO <container>** - Convenience shortcut for 'get item; put item in container`.  <container> can also be GROUND or FLOOR`"
+            msg << "    **PAUSE**                        - Pause the script.  #{name} will resume where it left off when unpaused."
+            msg << "    **WAITRT**                       - Wait for roundtime to finish.  Hangs if not in roundtime."
+            msg << "    **WAITFOR <phrase>**             - Waits to see the specified phrase.  Case insensitive."
+            msg << "    **WAITRE <pattern>**             - Waits to see the specified regular expression."
+            msg << ''
+            msg << "There are some other convenience shortcuts with certain regular game commands, details are in the online documentation."
+            msg << "#{name} is blind to closed containers."
+            msg << ''
+            msg << "If #{name} is trusted ('#{$lich_char}trust #{@script.name}'), its initial inventory scan output will be silenced."
+            msg << ''
+            msg << "Item types are based on Lich's definition of item types, also seen in #{$lich_char}sorter.  The current list is:"
+            msg << GameObj.type_data.map{|k,v| k}.sort.join(', ')
+        else
+            msg << "**ATTRIBUTEs** include **type**(default), **noun**, **name**, **fullname**, or shorthand equivalents **t**, **n**, **m*, and **f**"
+            msg << "**TARGETs** include any inventory container or **INV**, **WORN**, *ROOM**, **LOOT**, and **LAST** (and various synonyms listed in the full help)"
+            msg << "**COMMANDs** are any game command, or convenience shortcuts **ECHO**, **GIVEITEM**, **FASTMOVE**, **MOVE**, **PAUSE**, **WAITRT**, **WAITFOR** and **WAITRE**"
+            msg << ''
+        end
+
+        if full
+            msg << "**To view detailed documentation online and examples online, visit:**"
+        else
+            msg << "**This is the short version of the documentation.  For more, see #{name} help or visit:**"
+        end
+        msg << "https://github.com/dewiniaid/gs4-lich-scripts/blob/master/Foreach.md"
         msg << ''
-        msg << "    **INV** or **INVENTORY**  - Contents of all containers in your inventory."
-        msg << "    **WORN**              - All worn items in your inventory."
-        msg << "    **FLOOR/GROUND/ROOM** - Items in the room.  (Not their contents)"
-        msg << "    **LOCKER** or **LOOT**    - Contents of items in the room.  (e.g. locker containers)"
-        msg << "    **PREVIOUS** or **LAST**  - All items that matched the previous run of Foreach."
-        msg << ''
-        msg << "Each command will be executed on the item in sequence.  Within each command, the following replacements will be be made:"
-        msg << ''
-        msg << "    **ITEM**      - An exact reference to the item."
-        msg << "    **NAME**      - The full name of the item.  Not suitable for commands, suitable for speech."
-        msg << "    **NOUN**      - The item's noun.  Not suitable for commands, suitable for speech."
-        msg << "    **CONTAINER** - An exact reference to the container the item was found in.  Not if using FLOOR/GROUND."
-        msg << "                If using PREVIOUS, this is the container the item WAS in, not its current location."
-        msg << ''
-        msg << "If no commands are specified, #{name} will show a list of all matching items instead."
-        msg << "This list will show item types, so '#{name} in backpack' can help you determine which item type to use."
-        msg << ''
-        msg << "If no attribute or value are specified, #{name} examines all items in the relevant locations."
-        msg << ''
-        msg << "Each command can be a game command, a lich script (invoked as if typing it in the client), or one of the following"
-        msg << "convenience commands:"
-        msg << ''
-        msg << "    **ECHO <message>**               - Echo a line of text."
-        msg << "    **MOVE [<item>] TO <container>** - Convenience shortcut for 'get item; put item in container"
-        msg << "    **PAUSE**                        - Pause the script.  #{name} will resume where it left off when unpaused."
-        msg << "    **WAITRT**                       - Wait for roundtime to finish.  Hangs if not in roundtime."
-        msg << "    **WAITFOR <phrase>**             - Waits to see the specified phrase.  Case insensitive."
-        msg << "    **WAITRE <pattern>**             - Waits to see the specified regular expression."
-        msg << ''
-        msg << "#{name} is blind to closed containers."
-        msg << ''
-        msg << "If #{name} is trusted ('#{$lich_char}trust #{@script.name}'), its initial inventory scan output will be silenced."
-        msg << ''
-        msg << "Item types are based on Lich's definition of item types, also seen in #{$lich_char}sorter.  The current list is:"
-        msg << GameObj.type_data.map{|k,v| k}.sort.join(', ')
+
         msg = msg.join("\n")
 
         if @stormfront
