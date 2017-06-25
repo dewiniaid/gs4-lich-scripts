@@ -25,10 +25,16 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.5 (2017-06-24)
+  version: 0.5.2 (2017-06-25)
 
   changelog:
-    version 0.5 (2017-06-23)
+    version 0.5.2 (2017-06-25)
+      * Now properly handles containers with FLAG SORTEDVIEW ON.
+
+    version 0.5.1 (2017-06-25)
+      * Cosmetic bugfix to help summary.
+
+    version 0.5 (2017-06-24)
       * `;foreach in inventory` now uses and parses INV FULL rather than the tedious scanning process and relying on
         Lich's container management.  This is MUCH faster than the old approach.
       * You can now use t=, n= and m= as shorthand for 'type', 'noun=' and 'name=', respectively
@@ -91,9 +97,9 @@
 =end
 
 module ForeachScript
-    VERSION = '0.5 (2017-06-24)'
+    VERSION = '0.5.2 (2017-06-25)'
     COMMAND_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
-    INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|There is nothing [io]n there|That is closed.|I could not find what you were referring to\./
+    INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|There is nothing [io]n there|That is closed.|I could not find what you were referring to\./
     HOOK = 'foreach_script_temp_hook'
 
     INVFULL_PATTERN = /^( {2,})([^<]*)<a exist="(-?\d+)" noun="([^"]*)">([^<]*)<\/a>(?: ([^(]*)(?:$|(?= \()))?(?: (\(.*\)))?$/
@@ -167,8 +173,8 @@ module ForeachScript
             msg << "Item types are based on Lich's definition of item types, also seen in #{$lich_char}sorter.  The current list is:"
             msg << GameObj.type_data.map{|k,v| k}.sort.join(', ')
         else
-            msg << "**ATTRIBUTEs** include **type**(default), **noun**, **name**, **fullname**, or shorthand equivalents **t**, **n**, **m*, and **f**"
-            msg << "**TARGETs** include any inventory container or **INV**, **WORN**, *ROOM**, **LOOT**, and **LAST** (and various synonyms listed in the full help)"
+            msg << "**ATTRIBUTEs** include **type**(default), **noun**, **name**, **fullname**, or shorthand equivalents **t**, **n**, **m**, and **f**"
+            msg << "**TARGETs** include any inventory container or **INV**, **WORN**, **ROOM**, **LOOT**, and **LAST** (and various synonyms listed in the full help)"
             msg << "**COMMANDs** are any game command, or convenience shortcuts **ECHO**, **GIVEITEM**, **FASTMOVE**, **MOVE**, **PAUSE**, **WAITRT**, **WAITFOR** and **WAITRE**"
             msg << ''
         end
@@ -234,7 +240,17 @@ module ForeachScript
     end
 
     def self.quiet_inv_scan_hook(xml)
-        (xml =~ INV_PATTERN or xml =~ /^<prompt/ or xml =~ /^\s*$/) ? nil : xml
+        if @in_sorted_view
+            @in_sorted_view = false if xml =~ /Total items: \d+$/
+            return nil
+        end
+
+        return nil if xml =~ /^<prompt|^s*$/
+        return xml unless xml =~ INV_PATTERN
+        @in_sorted_view = true if $3
+        return nil
+        #
+        # (xml =~ INV_PATTERN or xml =~ /^<prompt/ or xml =~ /^\s*$/) ? nil : xml
     end
 
     def self.stop_scripts
@@ -333,7 +349,7 @@ module ForeachScript
             if command =~ /^(drop|place|sell|appraise)$/i
                 command = "#{$1} item"
             end
-            if ix == 0 and command =~ /^(drop|place|sell|app(?:raise))?\s+item$/i
+            if ix == 0 and command =~ /^(?:giveitem)|(?:(drop|place|sell|app(?:raise))?\s+item)$/i
                 if target =~ /^worn$/
                     new_commands << 'remove item'
                 else
@@ -357,7 +373,7 @@ module ForeachScript
         silence_me if $SAFE == 0
         if target =~ /^inv(?:entory)?$/i
             if commands.length > 0 and value.nil?
-                echo 'WARNING: THIS COMMAND WILL EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
+                echo 'WARNING: THIS COMMAND WILL ACT ON EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
                 if explicit_all
                     echo "'#{$lich_char}kill #{@script.name}' to abort!"
                     sleep 0.5  # A moment before it all scrolls off
@@ -438,16 +454,18 @@ module ForeachScript
                 echo "Timed out waiting for inventory command."
                 exit
             end
-            unless $1
+            exist = ($1 or $3)
+            name = ($2 or $4)
+            unless exist
                 echo "Error locating item or item inventory."
                 exit
             end
-            unless GameObj.containers[$1]
+            unless GameObj.containers[exist]
                 echo "Error loading item inventory."
                 exit
             end
-            to_filter[$1] = GameObj.containers[$1]
-            container_names[$1] = $2
+            to_filter[exist] = GameObj.containers[exist]
+            container_names[exist] = name
         end
 
         if to_scan.length > 0
@@ -456,6 +474,7 @@ module ForeachScript
             echo "Scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
             # echo 'Scanning inventory...' if $SAFE == 0
             hook = self.anon_hook
+            @in_sorted_view = false
             DownstreamHook.add(hook, proc {|xml| self.quiet_inv_scan_hook(xml)})
             to_scan.each{|exist|
                 if remaining != to_scan.length and remaining % CONTAINER_UPDATE_INTERVAL == 0
@@ -614,7 +633,7 @@ module ForeachScript
                                 echo 'Give to whom?'
                                 exit
                             end
-                            fput "give ##{item.id}"
+                            fput "give ##{item.id} to #{$1}"
                             script.want_downstream = true
                             script.want_downstream_xml = false
                             waitfor /^#{$1} has accepted your offer/
