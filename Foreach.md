@@ -1,4 +1,4 @@
-# Foreach 0.5
+# Foreach 0.6
 
 *Stop the up-up-up-enter!*
 
@@ -37,7 +37,9 @@ While not a full replacement for "proper" purpose-built Lich scripts, it is stil
   
 ## That's nice.  But what can it REALLY do?
 
-Usage: **;foreach** _[what]_ **in/on** _target_ [**;** _command1_**;** _command2_**;** ...]
+Usage: **;foreach** _[what]_ **in/on** _target_ [**;** _command1_**;** _command2_**;** ...]  
+*or:*  **;foreach** _[what]_ **in/on** _target_ [**/** _command1_**/** _command2_**/** ...]  
+*or:*  **;foreach** _[what]_ **in/on** _target_ [**|** _command1_**|** _command2_**|** ...]
 
 ### What
 
@@ -94,6 +96,10 @@ a command in game, but there's also a few special options:
   
 ### Commands
 
+Commands are separated by semicolons (`;`), slashes (`/`) or pipes (`|`).  You can only use type of separator in a given
+invocation of Foreach -- it's determined by the first one Foreach sees.  The examples here all use semicolons, but the other two formats may be useful if one of your commands needs to
+actually include semicolons (aside from Lich scripts) -- say, the lines of `LORESING`.
+
 If you don't give Foreach any commands to perform, it simply spits out a list of all the matching items and some
 relevant stats.  This is useful, but usually you want to do something with items.
 
@@ -146,6 +152,17 @@ In addition, the following convenience shortcuts exist:
   same time.
   
   This can be shortened as **fastmv**, **fmove** or **fmv**
+  
+* **stash** _[what]_  
+  This tries to store _what_ in your defined lootsack.  If it is full, it tries lootsack2 and so on.
+  
+  You can setup your lootsacks with `;vars` -- e.g. 
+  ```
+  ;vars set lootsack=backpack
+  ;vars set lootsack2=cloak
+  ```
+  
+  Lootsacks that stop being in your inventory while **Foreach** is running will stop having items fed to them.  
 
 * **giveitem** [**to**] _player_
   If this is the *first* command, foreach adds an implicit `get item` before it.  

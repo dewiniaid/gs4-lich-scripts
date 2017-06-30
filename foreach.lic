@@ -25,9 +25,23 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.5.2 (2017-06-25)
+  version: 0.6 (2017-06-69)
 
   changelog:
+    version 0.6 (2017-06-29)
+      * Add first-time setup walkthrough.
+      * Add STASH, which tries storing the item in your lootsacks (in order)
+      * MOVE, FASTMOVE now internally use _DRAG when they can, which reduces them to one command instead of two.
+      * DROP/DROP ITEM now internally uses _DRAG when it is the first command in the list.
+      * Increased inventory command timeout from 5 seconds to 15.
+      *
+
+    version 0.5.4 (2017-06-25)
+      * Another small bugfix to preemptive GET commands.
+
+    version 0.5.3 (2017-06-25)
+      * Small bugfix to preemptive GET commands.
+
     version 0.5.2 (2017-06-25)
       * Now properly handles containers with FLAG SORTEDVIEW ON.
 
@@ -97,10 +111,13 @@
 =end
 
 module ForeachScript
-    VERSION = '0.5.2 (2017-06-25)'
-    COMMAND_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
+    VERSION = '0.6 (2017-06-29)'
+    CONFIG_VERSION = 1
+    FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
     INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|There is nothing [io]n there|That is closed.|I could not find what you were referring to\./
     HOOK = 'foreach_script_temp_hook'
+    HELP_URL = "https://github.com/dewiniaid/gs4-lich-scripts/blob/master/Foreach.md"
+
 
     INVFULL_PATTERN = /^( {2,})([^<]*)<a exist="(-?\d+)" noun="([^"]*)">([^<]*)<\/a>(?: ([^(]*)(?:$|(?= \()))?(?: (\(.*\)))?$/
     # Matches: 1 = leading space, 2 = prename, 3 = id, 4 = noun, 5 = name, 6 = postname, 7 = registered/marked attributes
@@ -108,6 +125,12 @@ module ForeachScript
 
     CONTAINER_UPDATE_INTERVAL = 10  # How often do we notify how many more containers are being scanned
     ITEM_UPDATE_INTERVAL = 10  # How often do we notify how many more items are being processed?
+
+    COMMAND_PATTERNS = {
+        :move => /^(f(?:ast)?)?(?:move|mv)\s+(?:(.+)\s+)?to\s+(.*)$/i,
+
+
+    }
 
     @previous = nil unless defined?(@previous)
     @previous_names = nil unless defined?(@previous_names)
@@ -123,12 +146,216 @@ module ForeachScript
         }
     end
 
+    def self.send_formatted(msg, mono=true)
+        if @stormfront
+            msg = REXML::Text.new(msg, respect_whitespace: true).to_s
+            msg.gsub!(/\*\*(.*?)\*\*/, '<preset id="whisper">\1</preset>')
+            msg = "<output class=\"mono\" />\n#{msg}\n<output class=\"\" />" if mono
+            puts msg
+        else
+            msg.gsub!('**', '')
+            respond msg
+        end
+    end
+
+    def self.first_time_setup(force = false)
+        return if GameSettings['version'] == CONFIG_VERSION and not force
+
+        send = "#{$lich_char}send to #{@script.name}"
+
+        option = proc{|what|
+            cmd = "#{send} #{what.upcase}"
+            if @stormfront
+                puts "    <d cmd=\"#{cmd}\">#{cmd}</d>"
+            else
+                puts "    #{cmd}"
+            end
+        }
+
+
+        echo "Starting one time setup..."
+        clear
+
+        msg = ["**Welcome to ForEach version #{VERSION}**"]
+        msg << "**#{'-' * (msg[0].length-4)}**"
+        msg << "This one-time setup process will help you get started with ForEach and configure it for future use."
+        msg << "Once you've answered a few quick questions, you won't see these messages again."
+        msg << ''
+        if @stormfront
+            msg << "Click on your answers to the questions, or type '#{send} <answer>, where <answer> is your answer."
+        else
+            msg << "Type '#{send} <answer>' to answer these questions, where <answer> is your answer."
+        end
+        msg << ''
+        send_formatted(msg.join("\n"), false)
+
+        while true
+            puts "Would you like Lich to check for updates to this script on startup?\n"
+            option.call('yes')
+            option.call('no')
+            response = unique_get.strip.downcase
+            if response =~ /^y(?:es)?$/
+                Script.run('repository', "set-updatable #{@script.name}.lic")
+                respond "If you change your mind later, enter #{$lich_char}repository unset-updatable #{@script.name}.lic"
+                break
+            elsif response =~ /^no?$/
+                Script.run('repository', "unset-updatable #{@script.name}.lic")
+                respond "If you change your mind later, enter #{$lich_char}repository set-updatable #{@script.name}.lic"
+                break
+            else
+                echo 'Please answer YES or NO'
+            end
+        end
+        puts ''
+        sleep 1
+        gameobjadd = false
+        gameobjaddmore = false
+        while true
+            puts [
+                "ForEach has the ability to filter items by type using some functionality built-in to Lich.  However,",
+                " the data included in Lich is a bit outdated so some items may have the wrong type -- or have no type",
+                " at all.\n",
+                "\n",
+                "There's a third-party script called GameObjAdd that is designed to run on startup and add updated item",
+                " type data to Lich.  The script exits afterwards and requires no additional resources beyond that point.",
+                "  If you use Bigshot or some other scripts, you may already have this set up.",
+                "\n",
+                "Would you like me to setup GameObjAdd for you?\n",
+            ].join('')
+            option.call('yes')
+            option.call('no')
+            option.call('info')
+            response = unique_get.strip.downcase
+            if response =~ /^y(?:es)?$/
+                Script.run('repository', "download GameObjAdd.lic")
+                Script.run('autostart', "add --global GameObjAdd")
+                Script.run('GameObjAdd')
+                gameobjadd = true
+
+                respond "If you change your mind later, you can remove GameObjAdd from Autostart with: ${lich_char}autostart remove --global GameObjAdd"
+                break
+            elsif response =~ /^no?$/
+                respond "If you change your mind later, enter the following commands:"
+                respond "#{$lich_char}repository download GameObjAdd"
+                respond "#{$lich_char}repository set-updatable GameObjAdd"
+                respond "#{$lich_char}autostart add --global GameObjAdd"
+                break
+            elsif response =~ /^(?:info|help|details)$/
+                Script.run('repository', 'info GameObjAdd.lic')
+            else
+                echo 'Please answer YES, NO or INFO'
+            end
+        end
+
+        while gameobjadd
+            puts "Would you like Lich to check for updates to GameObjAdd on startup?\n"
+            option.call('yes')
+            option.call('no')
+            response = unique_get.strip.downcase
+            if response =~ /^y(?:es)?$/
+                Script.run('repository', "set-updatable GameObjAdd.lic")
+                respond "If you change your mind later, enter #{$lich_char}repository unset-updatable GameObjAdd.lic"
+                break
+            elsif response =~ /^no?$/
+                Script.run('repository', "unset-updatable GameObjAdd.lic")
+                respond "If you change your mind later, enter #{$lich_char}repository set-updatable GameObjAdd.lic"
+                break
+            else
+                echo 'Please answer YES or NO'
+            end
+        end
+
+
+        while true
+            puts [
+                     "In addition to GameObjAdd, I've written a script called GameObjAddMore that makes some further",
+                     " refinements to Lich's item type data.  It is an addition to GameObjAdd and is not a replacement for it.\n",
+                     "\n",
+                     "The current version of GameObjAddMore (as if this version of Foreach) mainly refines the criteria for",
+                     " what counts as a 'box', and adds a 'phased' category (items beginning with 'shifting').\n",
+                     "\n",
+                     "Like GameObjAdd, GameObjAddMore runs at startup, does its thing, and then immediately exits.\n",
+                     "\n",
+                     "Would you like me to setup GameObjAddMore for you?\n",
+                 ].join('')
+            option.call('yes')
+            option.call('no')
+            option.call('info')
+            response = unique_get.strip.downcase
+            if response =~ /^y(?:es)?$/
+                Script.run('repository', "download GameObjAddMore.lic")
+                Script.run('autostart', "add --global GameObjAddMore")
+                Script.run('GameObjAddMore')
+                gameobjaddmore = true
+
+                respond "If you change your mind later, you can remove GameObjAddMore from Autostart with: ${lich_char}autostart remove --global GameObjAddMore"
+                break
+            elsif response =~ /^no?$/
+                respond "If you change your mind later, enter the following commands:"
+                respond "#{$lich_char}repository download GameObjAddMore"
+                respond "#{$lich_char}repository set-updatable GameObjAddMore"
+                respond "#{$lich_char}autostart add --global GameObjAddMore"
+                break
+            elsif response =~ /^(?:info|help|details)$/
+                Script.run('repository', 'info GameObjAddMore.lic')
+            else
+                echo 'Please answer YES, NO or INFO'
+            end
+        end
+
+        while gameobjaddmore
+            puts "Would you like Lich to check for updates to GameObjAddMore on startup?\n"
+            option.call('yes')
+            option.call('no')
+            response = unique_get.strip.downcase
+            if response =~ /^y(?:es)?$/
+                Script.run('repository', "set-updatable GameObjAddMore.lic")
+                respond "If you change your mind later, enter #{$lich_char}repository unset-updatable GameObjAddMore.lic"
+                break
+            elsif response =~ /^no?$/
+                Script.run('repository', "unset-updatable GameObjAddMore.lic")
+                respond "If you change your mind later, enter #{$lich_char}repository set-updatable GameObjAddMore.lic"
+                break
+            else
+                echo 'Please answer YES or NO'
+            end
+        end
+
+        sleep 1
+        echo "Just a few more things..."
+        puts "You may want to check out some of my other scripts.  Here's a list:"
+        Script.run('repository', 'list --author=LostRanger')
+        puts ''
+        puts [
+            "If ForEach is a trusted script, it will hide the commands it is sending to scan inventories and thus",
+            " reduce a tiny bit of screen spam.  This is entirely optional and doesn't otherwise affect the script at all.",
+            "  You can trust the script with\n",
+        ].join('')
+        respond "    #{$lich_char}trust foreach"
+        puts "(LostRanger recommends that you review the code for scripts before trusting them!)"
+        puts "\nTo view information and examples on how to use #{$lich_char}foreach, read the following:"
+        respond "    #{HELP_URL}"
+        puts "\nTo see a short reminder on how to use #{$lich_char}foreach in game, type:"
+        respond "    #{$lich_char}#{@script.name} help"
+        puts "\nTo run this setup process again at any time, type:"
+        respond "    #{$lich_char}#{@script.name} setup"
+
+        if @script.vars[0].strip.length > 0 and not force
+           puts "\nTo run the command you were about to run when Foreach launched its first-time setup, type:"
+           respond "    #{$lich_char}#{@script.name} #{@script.vars[0]}"
+        end
+        GameSettings['version'] = CONFIG_VERSION
+        exit
+    end
+
     def self.show_help(full)
         msg = []
         name = "#{$lich_char}#{@script.name}"
         msg << "**This is ForEach version #{VERSION}**"
         msg << "**Usage:**"
         msg << "    #{name} [[ATTRIBUTE=]VALUE] in <TARGET>[; command; command; ...]"
+        msg << " or #{name} [[ATTRIBUTE=]VALUE] in <TARGET>[/ command/ command/ ...]"
+        msg << " or #{name} [[ATTRIBUTE=]VALUE] in <TARGET>[| command| command| ...]"
         msg << ''
         if full
             msg << "**ATTRIBUTE** can be one of: noun, name, or type.  If unspecified, it is type."
@@ -157,13 +384,14 @@ module ForeachScript
             msg << "Each command can be a game command, a lich script (invoked as if typing it in the client), or one of the following"
             msg << "convenience commands:"
             msg << ''
-            msg << "    **ECHO <message>**               - Echo a line of text."
-            msg << "    **GIVEITEM <player>**            - Give an item to a player and wait for them to accept it."
-            msg << "    **[FAST]MOVE [<item>] TO <container>** - Convenience shortcut for 'get item; put item in container`.  <container> can also be GROUND or FLOOR`"
-            msg << "    **PAUSE**                        - Pause the script.  #{name} will resume where it left off when unpaused."
-            msg << "    **WAITRT**                       - Wait for roundtime to finish.  Hangs if not in roundtime."
-            msg << "    **WAITFOR <phrase>**             - Waits to see the specified phrase.  Case insensitive."
-            msg << "    **WAITRE <pattern>**             - Waits to see the specified regular expression."
+            msg << "    **ECHO <message>**                 - Echo a line of text."
+            msg << "    **GIVEITEM <player>**              - Give an item to a player and wait for them to accept it."
+            msg << "    **[FAST]MOVE [<item>] TO <where>** - Convenience shortcut for 'get item; put item in container`.  <where> can also be GROUND or FLOOR`"
+            msg << "    **STASH [<item>]**                 - Attempts to move the item to your lootsack(s), trying them in order if they are full."
+            msg << "    **PAUSE**                          - Pause the script.  #{name} will resume where it left off when unpaused."
+            msg << "    **WAITRT**                         - Wait for roundtime to finish.  Hangs if not in roundtime."
+            msg << "    **WAITFOR <phrase>**               - Waits to see the specified phrase.  Case insensitive."
+            msg << "    **WAITRE <pattern>**               - Waits to see the specified regular expression."
             msg << ''
             msg << "There are some other convenience shortcuts with certain regular game commands, details are in the online documentation."
             msg << "#{name} is blind to closed containers."
@@ -175,12 +403,12 @@ module ForeachScript
         else
             msg << "**ATTRIBUTEs** include **type**(default), **noun**, **name**, **fullname**, or shorthand equivalents **t**, **n**, **m**, and **f**"
             msg << "**TARGETs** include any inventory container or **INV**, **WORN**, **ROOM**, **LOOT**, and **LAST** (and various synonyms listed in the full help)"
-            msg << "**COMMANDs** are any game command, or convenience shortcuts **ECHO**, **GIVEITEM**, **FASTMOVE**, **MOVE**, **PAUSE**, **WAITRT**, **WAITFOR** and **WAITRE**"
+            msg << "**COMMANDs** are any game command, or convenience shortcuts **ECHO**, **GIVEITEM**, **STASH**, **FASTMOVE**, **MOVE**, **PAUSE**, **WAITRT**, **WAITFOR** and **WAITRE**"
             msg << ''
         end
 
         if full
-            msg << "**To view detailed documentation online and examples online, visit:**"
+            msg << "**To view detailed documentation and examples online, visit:**"
         else
             msg << "**This is the short version of the documentation.  For more, see #{name} help or visit:**"
         end
@@ -271,108 +499,165 @@ module ForeachScript
         id == GameObj.right_hand.id or id == GameObj.left_hand.id
     end
 
+    def self.find_sacks(base = 'lootsack')
+        # Adapted from ;loot
+        sacks = []
+        ix = nil
+        while true
+            var = "#{base}#{ix}"
+            ix = 1 if ix.nil?
+            ix += 1
+            name = Vars[var].strip
+            return sacks unless name.length > 0
+            if name =~ /^my\s+(.*)$/i
+                name = $1
+            end
+            pattern = Regexp::escape(name)
+            sack = nil
+            [ /\b#{pattern}$/i, /\b#{pattern.sub(' ', '.*')}$/i, /\b#{pattern.sub(' ', '.*')}/i ].each{|pattern|
+                sack = GameObj.inv.find {|obj| obj.name =~ pattern }
+                break if sack
+            }
+            if sack
+                sacks << sack
+            else
+                echo "warning: failed to find #{var} '#{name}'"
+            end
+        end
+    end
+
+    def self.build_filter(value, attr)
+        attr = 'type' unless attr
+        return proc {|item| true} unless value
+
+        pattern = /^(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})$/
+        case attr
+            when 'type', 't'
+                unless GameObj.type_data.find{|k, v| k.split(',').find{|t| t =~ pattern}}
+                    echo "No item types match the pattern '#{value}'.  Did you perhaps mean '#{$lich_char}#{@script.name} #{value =~ /\s/ ? 'name' : 'noun'}=#{value} in #{target};...'?"
+                    echo "Type '#{$lich_char}#{@script.name}' by itself for more options and a list of item types."
+                    exit
+                end
+                return proc {|item| item.type.split(',').find{|t| t =~ pattern}}
+            when 'name', 'm'
+                return proc {|item| item.name =~ pattern}
+            when 'fullname', 'f'
+                return proc {|item| item.full_name =~ pattern}
+            when 'noun', 'n'
+                return proc {|item| item.noun =~ pattern}
+            else
+                return nil
+        end
+    end
+
+
     def self.run(script)
         @stormfront = ($frontend == 'stormfront')
         @profanity = ($frontend == 'profanity')
         @script = script
         @script.want_downstream = false
         @script.want_downstream_xml = true
+
+        self.first_time_setup(@script.vars[0] =~ /^\s*setup\s*$/i ? true : false)
+
         @stopped_scripts = []
         before_dying {
             self.cleanup
             resume_scripts
         }
 
-        instruction, *commands = @script.vars[0].strip.split(/\s*;\s*/)
+        @script.vars[0] =~ /^\s*(.+?)\s*(?:([;\/|])\s*(.*?)\s*)?$/
+        filter = $1
+        separator = $2
+        commands = $3
 
-        # Since ; is our separator, and is also the default lich character, treat an 'empty' command as an invocation
-        # of a lich script  because (;foreach ...; ;script) will become ["foreach...", "", "script"]
-        if $lich_char == ';' and commands.length > 0
-            while ix = commands.find_index('')
-                while commands[ix+1] == ''
-                    commands.delete_at(ix+1)
-                end
-                commands[ix+1] = "#{$lich_char}#{commands[ix+1]}" if commands[ix+1]
-                commands.delete_at(ix)
-            end
-        end
-
-        unless instruction =~ COMMAND_PATTERN
-            self.show_help((instruction =~ /^help$/i) ? true : false)
+        # Determine filter and container bits.
+        unless filter =~ FILTER_PATTERN
+            self.show_help((filter =~ /^help$/i) ? true : false)
             exit
         end
 
-        filter = nil
-        attribute = ($1.downcase or 'type')
-        value = $2
-        location = ($3 or $4)
+        filter_proc = nil
+        filter_attr = ($1.downcase or 'type')
+        filter_value = $2
+        position = ($3 or $4)
         target = $5
         explicit_all = false  # Safety bypass.
 
-        if attribute == 'type' and value =~ /all|any|everything/i
+        if filter_attr == 'type' and filter_value =~ /all|any|everything/i
             explicit_all = true
-            attribute = nil
-            value = nil
+            filter_attr = nil
+            filter_value = nil
         end
 
-        if value
-            alternatives = value.split(/\s*,\s*/)
-            pattern = /^(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})$/
-            # alternatives.map!{|x| "(?:^#{Regexp::escape(x).gsub('\*', '.*')}$"}
-            # pattern = /^#{Regexp::escape(value).gsub('\*', '.*')}$/i
-            case attribute
-                when 'type', 't'
-                    unless GameObj.type_data.find{|k,v| k.split(',').find{|t| t =~ pattern}}
-                        echo "No item types match the pattern '#{value}'.  Did you perhaps mean '#{$lich_char}#{@script.name} #{value =~ /\s/ ? 'name' : 'noun'}=#{value} in #{target};...'?"
-                        echo "Type '#{$lich_char}#{@script.name}' by itself for more options and a list of item types."
+        filter_proc = self.build_filter(filter_value, attr)
+        unless filter_proc
+            echo "Unknown attribute '#{filter_attr}'"
+            exit
+        end
+
+        # Process commands
+        lootsacks = nil
+
+        if separator and commands
+            commands = commands.split(/\s*#{Regexp::escape(separator)}\s*/)
+            next_is_script = false
+            new_commands = []
+            commands.each_with_index{|command, ix|
+                if command == ''  # Blank.
+                    # Due to the split, a Lich script will appear as a blank command followed by the script invocation
+                    # as the next command -- if the separator and $lich_char are the same.  Flag this for the next run
+                    next_is_script = ($lich_char == separator)
+                    # Continue to the next iteration rather than adding this command, too.
+                    next
+                end
+                if next_is_script
+                    # Convert to script invocation
+                    command = "#{$lich_char}#{command}"
+                end
+                if command =~ /^(drop|place|sell|appraise|stash)$/i
+                    # Add implicit ITEM if no modifiers.
+                    command = "#{$1} item"
+                end
+                if command =~ /^stash\s+/i and not lootsacks
+                    # Adapted from ;loot, with heavy modifications
+                    lootsacks = self.find_sacks('lootsack')
+                    unless lootsacks.length > 0  # Already did the search
+                        echo "Failed to find any lootsacks, STASH will not work."
+                        echo "Configure lootsacks with ;vars set lootsack=container, ;vars set lootsack2=container, etc...."
                         exit
                     end
-
-                    filter = proc {|item| item.type.split(',').find{|t| t =~ pattern}}
-                when 'name', 'm'
-                    filter = proc {|item| item.name =~ pattern}
-                when 'fullname', 'f'
-                    filter = proc {|item| item.full_name =~ pattern}
-                when 'noun', 'n'
-                    filter = proc {|item| item.noun =~ pattern}
-                else
-                    echo "Unknown attribute '#{attribute}'"
-                    exit
-            end
-        else
-            filter = proc {|item| true}
+                end
+                if ix == 0
+                    # Add implicit GETs if no modifiers.
+                    if command =~ /^drop\s+item$/i
+                        command = '_drag item drop'
+                    elsif command =~ /^(?:giveitem)|^(?:(place|sell|app(?:raise)?)\s+item)$/i
+                        if target =~ /^worn$/
+                            new_commands << 'remove item'
+                        else
+                            new_commands << 'get item'
+                        end
+                    end
+                end
+                new_commands << command
+                if commands.length == 1 and command =~ /^app(?:raise)?\s+item$/i
+                    new_commands << 'return'
+                end
+            }
+            commands = new_commands
         end
 
-        # Handle command extensions
-        new_commands = []
-        commands.each_with_index{|command, ix|
-            if command =~ /^(drop|place|sell|appraise)$/i
-                command = "#{$1} item"
-            end
-            if ix == 0 and command =~ /^(?:giveitem)|(?:(drop|place|sell|app(?:raise))?\s+item)$/i
-                if target =~ /^worn$/
-                    new_commands << 'remove item'
-                else
-                    new_commands << 'get item'
-                end
-            end
-            new_commands << command
-            if commands.length == 1 and command =~ /^app(?:raise)?\s+item$/i
-                new_commands << 'return'
-            end
-        }
-        commands = new_commands
-
-        # echo commands.inspect
-        # exit
-        #
         # Find possible item IDs
         to_scan  = []
         to_filter = {}
         container_names = {nil => 'On the ground'}
         silence_me if $SAFE == 0
-        if target =~ /^inv(?:entory)?$/i
-            if commands.length > 0 and value.nil?
+
+
+        if target =~ /^inv(?:entory)?$/i  # Entire inventory
+            # Sanity check
+            if commands.length > 0 and filter_value.nil?
                 echo 'WARNING: THIS COMMAND WILL ACT ON EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
                 if explicit_all
                     echo "'#{$lich_char}kill #{@script.name}' to abort!"
@@ -383,22 +668,10 @@ module ForeachScript
                 end
             end
 
-
-            # data = self.quiet_command('inv containers', /You are wearing .*<a exist="/)[0]
-            # unless data
-            #     echo "Failed to retrieve inventory containers."
-            #     exit
-            # end
-            # data.scan(/(?:<a exist="(\d+)")+/).each{|match|
-            #     id = match[0]
-            #     to_scan << id
-            #     container_names[id] = GameObj.inv.find{|item| item.id == id}.full_name
-            # }
-
+            # Parse INV FULL output, sort of.
             data = self.quiet_command(
                 'inv full',
                 /^(?:You are carrying nothing at this time|You are currently wearing and carrying)/,
-                # /^(?:You are carrying nothing at this time|\(\d+ items? displayed.\))/,
                 /<prompt/,
                 true,
                 5
@@ -422,7 +695,7 @@ module ForeachScript
                             echo "Please save a copy of INV FULL and contact LostRanger"
                             exit
                         end
-                        item = GameObj.new($3, $4, $5, $2, $6)
+                        item = GameObj.new($3.dup, $4.dup, $5.dup, $2.dup, $6.dup)
                         unless to_filter[last_container]
                             to_filter[last_container] = []
                             container_names[last_container] = last_container_name
@@ -432,24 +705,24 @@ module ForeachScript
                         nil  # noop
                 end
             }
-        elsif target =~ /^(?:prev(?:ious)?|last)$/i
+        elsif target =~ /^(?:prev(?:ious)?|last)$/i  # Previous run
             unless @previous
                 echo "No previous run data is available."
                 exit
             end
             to_filter = @previous
             container_names = @previous_names
-        elsif target =~ /^(?:loot|locker)$/i
+        elsif target =~ /^(?:loot|locker)$/i  # Loot/locker/containers on ground
             to_scan = GameObj.loot.map{|item| item.id}
             GameObj.loot.each{|item| container_names[item.id] = item.full_name}
-        elsif target =~ /^(?:floor|ground|room)$/i
+        elsif target =~ /^(?:floor|ground|room)$/i  # Items on ground
             to_filter[nil] = GameObj.loot
-        elsif target =~ /^worn$/i
+        elsif target =~ /^worn$/i  # Worn items
             to_filter[nil] = GameObj.inv
             container_names[nil] = 'On your person'
-        else
+        else   # A specific container
             stop_scripts
-            xml = dothistimeout("look #{location} #{target}", 5, INV_PATTERN)
+            xml = dothistimeout("look #{position} #{target}", 15, INV_PATTERN)
             unless xml =~ INV_PATTERN
                 echo "Timed out waiting for inventory command."
                 exit
@@ -481,7 +754,7 @@ module ForeachScript
                     echo "Still scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
                 end
                 remaining -= 1
-                fput "look #{location} ##{exist}" }
+                fput "look #{position} ##{exist}" }
             waitfor '<prompt'
             DownstreamHook.remove(hook)
             to_scan.each{|exist|
@@ -499,7 +772,7 @@ module ForeachScript
                 container_names.delete(container)
                 next
             end
-            items = items.find_all{|item| filter.call(item)}
+            items = items.find_all{|item| filter_proc.call(item)}
             unless items.length > 0
                 container_names.delete(container)
                 next
@@ -518,6 +791,8 @@ module ForeachScript
 
         before_next = nil  # Possibly skippable things to do before the next command.
 
+        move_container_cache = {}
+
         processed_items = 0
         filtered.each{|container, items|
             # next unless items.length > 0
@@ -530,9 +805,9 @@ module ForeachScript
                         percent = (100.0 * processed_items / total_items).to_i
                         echo "Item #{processed_items + 1} of #{total_items}.  (#{percent}% complete)"
                     end
-                    commands.each{|command, ix|
+                    commands.each_with_index{|original, ix|
                         command = (
-                            command
+                            original
                             .gsub(/\bitem\b/i, ref)
                             .gsub(/\bnoun\b/i, item.noun)
                             .gsub(/\bname\b/i, item.name)
@@ -545,16 +820,29 @@ module ForeachScript
                             scriptname = scriptname[1..-1]
                             echo "Running #{$lich_char}#{scriptname} #{args}"
                             Script.run(scriptname, args)
-                        elsif command =~ /^(f(?:ast)?)?(?:move|mv)\s+(?:(.+)\s+)?to\s+(.*)$/i
+                        elsif command =~ COMMAND_PATTERNS[:move]
                             before_next.call if before_next
                             before_next = nil
                             fast = $1 ? true : false
                             what = ($2 or ref)
                             where = $3
                             holding = (what == ref and self.holding?(item.id))
-
+                            floor = (where =~ /^(?:ground|floor)$/i) ? true : false
+                            if what[0] == '#'
+                                if floor
+                                    fput "_drag #{what} drop"
+                                    waitfor '<right>Empty', '<left>Empty'
+                                    next
+                                end
+                                where = move_container_cache[where] if move_container_cache[where]
+                                if where[0] == '#'
+                                    fput "_drag #{what} #{where}"
+                                    waitfor '<right>Empty', '<left>Empty'
+                                    next
+                                end
+                            end
                             get_command = "get #{what}"
-                            put_command = (where =~ /^(?:ground|floor)$/i) ? "place #{what}" : "put #{what} in #{where}"
+                            put_command = floor ? "place #{what}" : "put #{what} in #{where}"
 
                             unless holding
                                 if fast
@@ -565,11 +853,43 @@ module ForeachScript
                             end
                             if fast
                                 put put_command
-                                # waitfor '<right>', '<left>' unless holding
-                                waitfor '<right>', '<left>'
                             else
                                 fput put_command
                             end
+                            waitfor '<right>', '<left>'
+                            next if floor
+
+                            unless where[0] == '#' or move_container_cache.include?(where)
+                                nil until get =~ /^(?:(?:<.*>)?You (?:put|absent-mindedly drop) (?:[^<]*)<a exist="(-?\d+).*?<\/a>.*<a exist="(-?\d+).*?<\/a)|<prompt/
+                                move_container_cache[where] = ($2 and GameObj.inv.find{|x| x.id == $2}) ? "##{$2}" : false
+                                # if $2
+                                #     # echo "Learned that '#{where}' is ##{$2}"
+                                #     if GameObj.inv.find{|x| x.id == $2}
+                                #         # echo "Learned that '##{$2}' is an inventory container, and probably doesn't support ON/UNDER/BEHIND"
+                                #         move_container_cache[where] = "##{$2}"
+                                #     else
+                                #         # echo "Learned that '##{$2}' is NOT an inventory container, and might support ON/UNDER/BEHIND"
+                                #         move_container_cache[where] = false
+                                #     end
+                                # else
+                                #     # echo "Learned that '#{where}' is probably a scripted container of some sort."
+                                #     move_container_cache[where] = false
+                                # end
+                                # if $2
+                                #     # echo "Learned that '#{where}' is ##{$2}"
+                                #     if GameObj.inv.find{|x| x.id == $2}
+                                #         # echo "Learned that '##{$2}' is an inventory container, and probably doesn't support ON/UNDER/BEHIND"
+                                #         move_container_cache[where] = "##{$2}"
+                                #     else
+                                #         # echo "Learned that '##{$2}' is NOT an inventory container, and might support ON/UNDER/BEHIND"
+                                #         move_container_cache[where] = false
+                                #     end
+                                # else
+                                #     # echo "Learned that '#{where}' is probably a scripted container of some sort."
+                                #     move_container_cache[where] = false
+                                # end
+                            end
+
                             #
                             #
                             #
@@ -593,6 +913,32 @@ module ForeachScript
                         #     put "put #{what} in #{where}"
                         #     waitfor '<right>', '<left>' unless holding
                         #     waitfor '<right>', '<left>'
+                        elsif command =~ /^stash (.*$)/i
+                            what = $1
+                            success = false
+                            lootsacks.length.times{
+                                sack = lootsacks[0]
+                                next unless GameObj.inv.find{|x| x.id == sack.id}
+                                where = "##{sack.id}"
+                                if what[0] == '#' and ix == 0
+                                    fput "_drag #{what} #{where}"
+                                else
+                                    fput "get #{what}" if ix == 0
+                                    fput "put #{what} in #{where}"
+                                end
+                                nil until get =~ /^Your .* won't fit in .*|<(left|right)>Empty</
+                                waitfor '<prompt'
+                                if $1
+                                    success = true
+                                    break
+                                end
+                                lootsacks << lootsacks.shift
+                                # echo lootsacks.map{|x| x.name}.join('; ')
+                            }
+                            next if success
+                            echo "All lootsacks are full, pausing script."
+                            echo "#{$lich_char}unpause #{@script.name} to continue anyways, or abort with #{$lich_char}kill #{@script.name}"
+                            pause_script
                         elsif command =~ /^echo (.*)$/i
                             before_next.call if before_next
                             before_next = nil
