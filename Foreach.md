@@ -145,6 +145,8 @@ In addition, the following convenience shortcuts exist:
   Shorthand for getting _what_ and then putting it in _where_.  If you omit _what_, 'item' is assumed.
   
   **mv** is shorthand for **move**
+  
+  Newer versions of foreach will use `_drag` (mimicking Stormfront drag-and-drop functionality) to reduce this from two commands to one when they think it is safe to do so.
 
 * **fastmove** _[what]_ **to** _where_  
   This is a somewhat faster version of the above, but it's more prone to failing if you have oddly scripted containers
@@ -152,7 +154,9 @@ In addition, the following convenience shortcuts exist:
   same time.
   
   This can be shortened as **fastmv**, **fmove** or **fmv**
-  
+
+  Newer versions of foreach will use `_drag` (mimicking Stormfront drag-and-drop functionality) to reduce this from two commands to one when they think it is safe to do so.
+
 * **stash** _[what]_  
   This tries to store _what_ in your defined lootsack.  If it is full, it tries lootsack2 and so on.
   
@@ -176,7 +180,9 @@ In addition, the following convenience shortcuts exist:
   If you're still holding the item at the end of running all of the commands, it will be returned to its parent 
   container.   
   `appraise` by itself is shorthand for `appraise item`.
-
+  
+* **return**
+  Equivalent to `put item in container`.  Returns whatever item Foreach is currently processing to whereever it originally found it.
   
 #### Control
   
