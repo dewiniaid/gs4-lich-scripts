@@ -69,7 +69,7 @@ count_next_jar = proc {
   # group 3 = count
   # group 4 = nil unless full
   while true
-    next unless script.gets =~ /.*<a exist="(\d+)".*?<\/a> (?:(is empty\.)|(?:you see (\d+) portions?.*?(It is full\.)?))$/
+    next unless @script.gets =~ /.*<a exist="(\d+)".*?<\/a> (?:(is empty\.)|(?:you see (\d+) portions?.*?(It is full\.)?))$/
     id = $1
     next unless waiting.delete?(id)
     jars[id].count = $3.to_i
@@ -153,8 +153,11 @@ gems.each{|name, ids|
   ids.each{|gemid|
     fput "get ##{gemid}"
     fput "put ##{gemid} in ##{last_jar.id}"
-    xml = nil
-    xml = script.gets until xml =~ /You (put your.*?into your empty|add.*?to the contents of)/
+    while true
+        xml = get
+        echo xml
+        break if xml =~ /You (put your.*?into your empty|add.*?to the contents of)/
+    end
     last_jar.count += 1
     last_jar.full = true if xml.include?(', filling it.')  # Jar is now full
     echo xml.inspect

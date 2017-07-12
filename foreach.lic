@@ -25,9 +25,16 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.6 (2017-06-69)
+  version: 0.6.2 (2017-06-69)
 
   changelog:
+    version 0.6.2 (2017-06-29)
+      * Fix an issue where every command after a script would be interpreted as a script.
+
+    version 0.6.1 (2017-06-29)
+      * Reminder to self to do better testing
+      * Fix foreach not working on anything but item types bug introduced in 0.6
+
     version 0.6 (2017-06-29)
       * Add first-time setup walkthrough.
       * Add STASH, which tries storing the item in your lootsacks (in order)
@@ -111,7 +118,7 @@
 =end
 
 module ForeachScript
-    VERSION = '0.6 (2017-06-29)'
+    VERSION = '0.6.2 (2017-06-29)'
     CONFIG_VERSION = 1
     FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
     INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|There is nothing [io]n there|That is closed.|I could not find what you were referring to\./
@@ -210,6 +217,7 @@ module ForeachScript
         sleep 1
         gameobjadd = false
         gameobjaddmore = false
+
         while true
             puts [
                 "ForEach has the ability to filter items by type using some functionality built-in to Lich.  However,",
@@ -526,7 +534,7 @@ module ForeachScript
         end
     end
 
-    def self.build_filter(value, attr)
+    def self.build_filter(value, attr, target)
         attr = 'type' unless attr
         return proc {|item| true} unless value
 
@@ -590,7 +598,7 @@ module ForeachScript
             filter_value = nil
         end
 
-        filter_proc = self.build_filter(filter_value, attr)
+        filter_proc = self.build_filter(filter_value, filter_attr, target)
         unless filter_proc
             echo "Unknown attribute '#{filter_attr}'"
             exit
@@ -612,6 +620,7 @@ module ForeachScript
                     next
                 end
                 if next_is_script
+                    next_is_script = false
                     # Convert to script invocation
                     command = "#{$lich_char}#{command}"
                 end
@@ -1022,7 +1031,7 @@ module ForeachScript
                 puts msg.join("\n")
             end
         }
-        if commands.length == 0
+        unless commands.length > 0
             puts "\nTotal items: #{total_items}"
         end
     end

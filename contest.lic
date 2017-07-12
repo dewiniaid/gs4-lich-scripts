@@ -1,0 +1,199 @@
+# fput "get calipers"
+# # fput lmas calibrate calipers
+# # waitrt?
+# fput "lmas measure box"
+# waitrt
+# fput "put calipers on table"
+# fput "get lockpick from table"
+# fput "pick box with lockpick"
+# waitfor "You settle into the"
+# waitrt?
+# fput "put lockpick on table"
+# fput "get calipers on table"
+# fput "lmas calibrate calipers"
+# waitrt
+# fput "give calipers to #{GameObj.npcs[0].noun}"
+
+# ;foreach box on table;pick item with my lockpick;look score
+
+module PickingContest
+    def self.show_status(msg)
+        total_time = (Time.now - @script_started).to_i
+        msg << "* Took #{total_time} seconds to do #{@repetitions} repetition(s) in #{@repetitions + @aborted_attempts + @failed_attempts} attempts."
+        msg << "* Time per attempt: #{(total_time / (@repetitions + @aborted_attempts + @failed_attempts)).to_i} seconds."
+        msg << "* Time per success: #{(total_time / @repetitions).to_i} seconds." if @repetitions > 0
+        msg << "* Failed #{@failed_attempts} attempts.  Aborted #{@aborted_attempts} attempts."
+        respond msg.join("\n")
+    end
+
+    def self.run(script)
+        if GameObj.npcs.length == 0
+            echo "No NPCs are currently available, or you are in the wrong room.  Aborting."
+            exit
+        end
+        @script = script
+
+        unless @script.vars[1]
+            echo "For more control over this script, use `#{$lich_char}#{@script.name} [min_score] [lockpick1 [lockpick2 [...]]`"
+            echo "e.g.  `#{$lich_char}#{@script.name} 2500 rolaren veniom vaalin`"
+            echo "Running with defaults."
+            sleep 2
+        end
+
+        @script.want_downstream_xml = true
+        @script.want_downstream = false
+
+        @target_score = 2000
+        @optimistic_average = 900
+
+        @script.vars.shift
+
+        if @script.vars[0] =~ /^\d+$/
+            @target_score = script.vars[0].to_i
+            @script.vars.shift
+        end
+
+        if @script.vars[0]
+            @lockpicks = script.vars.map{|x| "#{x} lockpick"}
+            @lockpicks << "vaalin lockpick" if lockpicks.length <= 1
+        else
+            @lockpicks = ["rolaren lockpick", "vaalin lockpick"]
+        end
+
+        @repetitions = 0
+        @aborted_attempts = 0
+        @failed_attempts = 0
+
+        @script_started = Time.now
+        while true
+            break if do_rep
+            show_status(["* IN PROGRESS"])
+        end
+
+        show_status(["* TASK COMPLETE!"])
+    end
+
+    def self.with_master
+        XMLData.room_exits.length == 1 and XMLData.room_exits[0] == 'out' and GameObj.npcs.length == 1
+    end
+
+    def self.should_abort_rep?
+        @score + (@optimistic_average * @boxes.length) < @target_score
+    end
+
+    def self.do_rep
+        @score = 0
+
+        @boxes = Set.new(["first box on table", "second box on table", "third box on table", "fourth box on table", "fifth box on table"])
+
+        if GameObj.npcs.length == 0
+            echo "I can't find any NPCs..."
+            exit
+        end
+
+        unless with_master
+            # pick an NPC at random
+            ix = (rand * GameObj.npcs.length).floor.to_i
+            move "ask #{GameObj.npcs[ix]} about training in lock mastery"
+        end
+
+        unless checkloot.include?("table")
+            waitfor 'As an apprentice goes about setting up a pair of tables '
+        end
+        rep_started = Time.now
+
+        @lockpicks.each{|pick|
+            fput "get #{pick} from table"
+            unless make_attempt
+                echo sprintf(
+                    "Projected score is too low, giving up.  Time spent picking: %d seconds.",
+                    Time.now - rep_started
+                )
+                @aborted_attempts += 1
+                waitrt?
+                move 'out'
+                return
+            end
+            put 'look scorecard'
+            waitrt?
+            fput "put #{pick} on table"
+            break if @boxes.empty?
+        }
+
+        unless @boxes.empty?
+            fput "get #{@lockpicks[-1]} from table"
+            unless make_attempt
+                echo sprintf(
+                         "Projected score is too low, giving up.  Time spent picking: %d seconds.",
+                         Time.now - rep_started
+                     )
+                @aborted_attempts += 1
+                put 'look scorecard'
+                waitrt?
+                move 'out'
+                return
+            end
+            fput "put #{@lockpicks[-1]} on table"
+        end
+
+        picking_completed = Time.now
+
+        nil until get =~ /^\[You have (\d+) repetitions? remaining\.\]|^\[You have (completed) your training task.\]|(escorts) you back to the training area\.\s*$/
+        rep_completed = Time.now
+        summary = sprintf(
+            "Time spent picking: %d seconds.  Time spent waiting: %d seconds.  Total time: %d seconds.",
+            picking_completed - rep_started,
+            rep_completed - picking_completed,
+            rep_completed - rep_started
+        )
+        waitrt?
+        if $3
+            @failed_attempts += 1
+            echo "This attempt failed.  #{summary}"
+            return
+        end
+        move 'out'
+        @repetitions += 1
+        if $2
+            echo "This attempt was successful.  You have completed your task.  #{summary}"
+            return true
+        end
+        echo "This attempt was successful.  #{$1} #{$1 == '1' ? 'repetition remains' : 'repetitions remain'}.  #{summary}"
+    end
+
+    def self.make_attempt
+        @boxes.each{|box|
+            while true  # To allow retries on a fumble
+                try_again = false
+                result_started = false
+                waitrt?
+                fput "pick #{box} with my lockpick"
+                while true
+                    nil until get =~ /^(<prompt)|^You settle into the difficult task of picking|You make a (fumbling) attempt|^\[You have (?:scored|been penalized) (-?\d+) points!\]\s*/
+                    if $1  # prompt
+                        break if result_started
+                        next
+                    end
+                    result_started = true
+                    try_again = true if $2  # fumble
+                    if $3  # Score modification
+                        v = $3.to_i
+                        if v >= 0  # success
+                            try_again = false
+                            @boxes.delete(box)
+                        end
+                        @score += $3.to_i if $3  # Modify score
+                    end
+                end
+                echo "#{@boxes.length} #{@boxes.length == 1 ? 'box remains' : 'boxes remain'}.  Score #{@score}"
+                return false if should_abort_rep?
+                break unless try_again
+                echo "Retrying this box due to fumble"
+                next
+            end
+        }
+        return true
+    end
+end
+
+PickingContest.run(script)

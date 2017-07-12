@@ -25,7 +25,7 @@ end
 if GameObj.npcs.length > 1
   # pick one at random
   ix = (rand * GameObj.npcs.length).floor.to_i
-  move "ask #{GameObj.npcs[ix]} about training"
+  move "ask #{GameObj.npcs[ix]} about training in lock mastery"
   waitfor "Take the calipers"
 end
 

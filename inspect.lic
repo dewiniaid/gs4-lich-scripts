@@ -12,8 +12,13 @@
 	  tags: inspect
 	  required: Lich >= 4.6.0
 
-  version: 0.3 (2017-06-02)
+  version: 0.5 (2017-07-01)
+
   changelog:
+    version 0.5 (2017-07-01)
+      * ;inspect by itself now shows the table of weights and item counts
+    version 0.4 (2017-06-23)
+      * Should now work for items in shops.
     version 0.3 (2017-06-02)
       * use a more sane method to identify the begin/end of INSPECT results.  Should solve issues of the script not
         always modifying output.
@@ -104,10 +109,36 @@ class InspectScript
         @mainthread = nil
     end
 
+    def show_tables
+        def tableize(what, title)
+            maxk = 0
+            maxv = 0
+            what.each{|k,v|
+                maxk = k.length if k.length > maxk
+                maxv = v.length if v.length > maxv
+            }
+
+            result = []
+            result << title.ljust(maxk + maxv + 3)
+            what.each{|k,v| result << "#{k.ljust(maxk)} = #{v.ljust(maxv)}" }
+            return result
+        end
+
+        weights = tableize(WEIGHTS, "CAPACITY")
+        counts  = tableize(COUNTS, "# OF ITEMS")
+
+        # We should do this cleaner, but for now we know weights has the most items.
+        (0..weights.length-1).each{|ix|
+            respond "#{weights[ix]}    #{counts[ix]}".strip
+        }
+        respond
+        respond "Type #{$lich_char}#{@script.name} <item> to inspect an item."
+    end
+
     def hook(line) # and sinker
         unless @started
             # Look for 'You carefully inspect' to trigger activity.
-            if line =~ /(?:You carefully inspect.*<a)|(?:What were you referring to\?)|(?:You can't inspect that)/
+            if line =~ /(?:You carefully (?:inspect|examine).*<a)|(?:What were you referring to\?)|(?:You can't inspect that)/
                 @started = true
             end
             return line
@@ -150,6 +181,11 @@ class InspectScript
     end
 
     def run(vars)
+        unless vars[0].length > 0
+            show_tables
+            return
+        end
+
         silence_me if $SAFE == 0  # Trusting this script will prevent it from sending INSPECT, optional.
 
         before_dying {
