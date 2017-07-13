@@ -88,11 +88,36 @@ module Jarserve2
         }
         PLURAL_REGEX = /^(.*?)(#{PLURAL_RULES.keys.map{|x| Regexp::escape(x)}.join('|')})$/
 
-        attr_accessor :name, :plural
+        attr_writer :name, :noun_first, :noun_first_plural
+        attr_accessor :plural
 
-        def initialize(name, plural=nil)
+        def initialize(name, plural=nil, noun_first=nil, noun_first_plural=nil)
             @name = name
             @plural = plural
+            @noun_first = noun_first
+            @noun_first_plural = noun_first_plural
+        end
+
+        def name(count=1)
+            return @name unless @plural and count != 1
+            return @plural
+        end
+
+        def n(count=1)
+            "#{count} #{self.name(count)}"
+        end
+
+        def noun_first(count=1)
+            return self.noun_first_plural if count != 1
+            @noun_first = @name.sub(/^(.+)\s+(.+)$/, "\\2, \\1") unless @noun_first
+            return @noun_first
+        end
+
+        def noun_first_plural
+            return @noun_first_plural if @noun_first_plural
+            return self.noun_first unless @plural
+            @noun_first_plural = @plural.sub(/^(.+)\s+((?<!lapis ).+)$/, "\\2, \\1")
+            return @noun_first_plural
         end
 
         def Gem.one(name)
@@ -133,11 +158,17 @@ module Jarserve2
         def to_s
             return @name
         end
+
+        def <=>(other)
+            return self.noun_first_plural <=> other.noun_first_plural
+        end
     end
 
 
     class JarSet < Set
         attr_reader :gem
+
+        FULL_PROC = proc {|item| item.full?}
 
         def initialize(gem, snapshot_of=nil)
             if snapshot_of
@@ -152,7 +183,7 @@ module Jarserve2
         end
 
         def snapshot
-            return @is_snapshot ? self : JarSet.new(gem, self)
+            return @is_snapshot ? self : JarSet.new(@gem, self)
         end
 
         def num
@@ -166,54 +197,100 @@ module Jarserve2
         end
 
         def filled
-            self.count{|item| item.full?}
+            self.count(&FULL_PROC)
         end
 
         def full
-            self.find_all{|item| item.full?}
+            self.select(&FULL_PROC)
         end
 
         def nonfull
-            self.find_all{|item| not item.full? }
+            self.reject(&FULL_PROC)
+        end
+
+        def sort(descending: false, include_full: true, &block)
+            what = include_full ? self.to_a : self.nonfull.to_a
+            if descending
+                if block_given?
+                    return what.sort{|a,b| -yield(a,b)}
+                else
+                    return what.sort{|a,b| b<=>a}
+                end
+            elsif block_given?
+                return what.sort(&block)
+            else
+                return what.sort
+            end
         end
 
         def least_filled(include_full=true)
             # Returns a list of jars sorted by least filled.  Full jars, regardless of capacity, will be last
-            (include_full ? self.to_a : self.nonfull).sort{|a,b|
-                next(a.full ? 1 : -1) if a.full != b.full
-                next(a.count <=> b.count)
-            }
+            # (include_full ? self.to : self.nonfull).sort
+            return sort(include_full: include_full)
         end
 
         def most_filled(include_full=true)
             # Returns a list of jars sorted by most filled.  Full jars, regardless of capacity, will be first
-            (include_full ? self.to_a : self.nonfull).sort{|a,b|
-                next(a.full? ? -1 : 1) if a.full? != b.full?
-                next(b.count <=> a.count)
-            }
+            # (include_full ? self.to : self.nonfull).sort{|a,b| b<=>a}
+            return sort(descending: true, include_full: include_full)
         end
-        #
-        # def filter(
-        #     unfilled: nil  # True = Include unfilled bases.  Integer = Include/keep(negative) up to this many unfilled boxes)
-        #
-        #     **kwargs)
-        #     # 4 20
-        #     # Want:
-        #     # Get all the unfilled jars
-        #     # ... but ensure at least X jars are allocated
-        #     # Get the X most filled jars
-        #     # ... but ensure at least X filled jars are saved.
-        #     # Get X/all filled jars
-        #     # ... but ensure at least X jars are allocatedj
-        #
-        #
-        #
-        #
-        #
-        #
-        # end
-    end
 
+        def filter(
+            descending: false,
+            full: nil,     # 0/false: No full jars.  >0: Take up to this many full jars.  <0: Take all but this many full jars.
+            nonfull: nil,  # 0/false: No nonfull jars.  >0: Take up to this many nonfull jars.  <0: Take all but this many nonfull jars.
+            skip: 0,       # Omit this many jars from the beginning.  Counts towards full/nonfull jars not taken.
+            take: nil,     # Take no more than this many jars.  nil=no limit
+            leave: 0      # Omit this many jars from the end.  Counts towards full/nonfull jars not taken.
+        )
+            len = self.length
+            take = len unless take
+            full = len unless full
+            nonfull = len unless nonfull
+            result = JarSet.new(@gem)
+            return result if (take <= 0)
+            return result if len <= skip+leave
+            return result if (full == 0 or -full >= len) and (nonfull == 0 or -nonfull >= len)
+            jars = self.sort(descending: descending)
+            return self if skip == 0 and leave == 0 and take >= len and full >= len and nonfull >= len
+            echo "Gem=#{self.gem.to_s}.  skip=#{skip} take=#{take} leave=#{leave}.  Jars=#{jars.map{|x| x.full? ? '!' : '.'}.join('')}"
+
+            # skip, leave = leave, skip if descending  # So we can always assume full jars will be last.
+
+            # How many full/nonfull jars in the result?
+            numfull = jars.count(&FULL_PROC)
+            numnonfull = jars.length - numfull
+
+            calc = proc {|base, query, count|
+                next([base, [-query, count].min].max) if query < 0
+                [base, count - query].max
+            }
+
+            skip, leave = leave, skip if descending
+            skip = calc.call(skip, nonfull, numnonfull)
+            leave = calc.call(leave, full, numfull)
+            skip, leave = leave, skip if descending
+            leave = [leave, len - skip - take].max
+            return result if skip+leave >= len
+
+            echo "Gem=#{@gem.to_s}.  skip=#{skip} take=#{take} leave=#{leave}.  Jars=#{jars.map{|x| x.full? ? '!' : '.'}.join('')}"
+
+            if skip > 0 or leave > 0
+                skip, leave = leave, skip if descending
+                leave = [leave, len - skip - take].max
+                jars = jars[skip .. -(leave+1)]
+            else
+                return self
+            end
+            jars.each{|jar| result << jar}
+            return result
+        end
+
+        def filter?(**filters)
+            return self unless filters.length > 0
+            return self.filter(**filters)
+        end
+    end
 
     class ReadOnlyJar
         attr_reader :gem, :id, :status, :count, :container
@@ -268,6 +345,18 @@ module Jarserve2
 
         def full?
             @status.nil? ? nil : (@status == 'full')
+        end
+
+        def <=>(other)
+            if other.gem != self.gem
+                return 1 unless other.gem
+                return -1 unless self.gem
+                return other.gem<=>self.gem
+            end
+            if (self.full? || false) != (other.full? || false)
+                return self.full? ? 1 : -1
+            end
+            return (self.count || -1) <=> (other.count || -1)
         end
     end
 
@@ -383,6 +472,18 @@ module Jarserve2
             item.after_name =~ PATTERNS[:jarcontaining]
             gem = Gem.many($1)
             return Jar.new(item.id, gem, container)
+        end
+
+        def <=>(other)
+            if other.gem != self.gem
+                return 1 unless other.gem
+                return -1 unless self.gem
+                return other.gem<=>self.gem
+            end
+            if (self.full? || false) != (other.full? || false)
+                return self.full? ? 1 : -1
+            end
+            return (self.count || -1) <=> (other.count || -1)
         end
     end
 
@@ -737,7 +838,7 @@ module Jarserve2
 
     def self.remove(jar)
         raise "Jar #{jar} is not part of our set of jars." unless @jars[jar.id]
-        @jars.delete(jar)
+        @jars.delete(jar.id)
         unless self[jar.gem].delete?(jar)
             raise "Jar #{jar} is not a member of the gemset it should be part of."
         end
@@ -774,7 +875,9 @@ module Jarserve2
             @refresh_pending << jar.id
         else
             @refresh_inflight << jar.id
+            silence_me if $SAFE == 0
             put "look in #{jar.ref}"
+            silence_me if $SAFE == 0
         end
     end
 
@@ -865,17 +968,20 @@ module Jarserve2
             end
 
             if is_jar?(item)
+                echo "#{item} is a jar."
                 jar = event[:jar] = @jars[item.id]
                 if event[:remove] and jar
                     remove(jar)
                 elsif event[:add] and not jar
+                    echo "Adding jar?"
                     if item.after_name.length > 0
                         if item.after_name =~ /^containing (.*)/
                             gem = Gem.many($1)
                         else
                             gem = nil
                         end
-                        jar = Jar.new(item.id, gem, nil)
+                        jar = event[:jar] = add(Jar.new(item.id, gem, nil))
+                        refresh(jar)
                     end
                 end
             end
@@ -895,7 +1001,9 @@ module Jarserve2
                 idnext = @refresh_pending.first
                 @refresh_pending.delete(idnext)
                 @refresh_inflight << idnext
+                silence_me if $SAFE == 0
                 put "look in ##{idnext}"
+                silence_me if $SAFE == 0
             end
             jar = event[:jar] = @jars[event[:id]]
             if jar
@@ -1104,25 +1212,26 @@ module Jarserve2
         @refreshlock = Mutex.new
         @lock = Mutex.new
 
-        @hook_pattern = /^(?:<c>)?#{Regexp::escape($lich_char)}(?:js2|jarserve2)\s+(.*?)\s*$/
-
         before_dying { cleanup }
 
         # Create our downstream XML ingest hook.
-        DownstreamHook.add(self.anon_hook, proc {|xml|
+        DownstreamHook.add(self.anon_hook('ingest'), proc {|xml|
             @eventq << {:type => :xml, :xml => xml.rstrip}
             xml
         })
 
         # Add our initial refresh task to the queue
-        self.do_refresh(true).then {|fut|
-            echo "***************************************"
-            echo "Jarserve2 is now fully operational.  Initial scan completed in #{fut.value} seconds."
-            echo "***************************************"
-        }
+        self.do_refresh(true).then {|fut| echo "Initial scan completed in #{fut.value} seconds." }
+
+        # Consruct the regex for the upstream hook
+        command_pattern = /^(?:<c>)?#{Regexp::escape($lich_char)}(?:js2|jarserve2)(?:\s+(\S+)((?:\s+\S+=\S*)+)?(?:\s+(.*?))?)?\s*$/
 
         # Add upstream hook once refresh is complete.
-        UpstreamHook.add(self.anon_hook, proc {|xml| self.client_hook(xml) })
+        UpstreamHook.add(self.anon_hook, proc {|xml|
+            next(xml) unless xml =~ command_pattern
+            self.perform_command($1, $2, $3)
+            next(nil)
+        })
 
         # Execute the event queue
 
@@ -1159,62 +1268,117 @@ module Jarserve2
         args.each{|arg| respond "[#{@script.name}: #{arg}]" }
     end
 
-    def self.client_hook(input)
-        return input unless input =~ @hook_pattern
-        command, argline = $1.split(/\s+/, 2)
+    BOOLEAN_TABLE = {
+        'yes' => true, 'y' => true, '1' => true, 'true' => true, 't' => true,
+        'no' => false, 'n' => false, '0' => false, 'false' => false, 'f' => false
+    }
+
+    def self.perform_command(command, options_string, argline)
+        command = command.downcase
         args = argline.split(/\s+/) or []
-        command.downcase!
+
+        jar_opts = {}
+        filter_opts = {}
+        if options_string
+            options_string.strip.downcase.split(/\s+/).each{|s|
+                option, value = s.split('=', 2)
+                bvalue = BOOLEAN_TABLE[value.downcase]
+                ivalue = value =~ /^-?\d+$/ ? value.to_i : nil
+
+                case option
+                    when 'maxfill', 'maxfilled'
+                        if ivalue.nil?
+                            echo "Invalid value for option '#{option}'"
+                            return
+                        end
+                        jar_opts[:maxfilled] = ivalue
+                    when 'allocate'
+                        if bvalue.nil?
+                            echo "Invalid value for option '#{option}'"
+                            return
+                        end
+                        jar_opts[:only_existing] = !bvalue
+                    when 'asc', 'ascend', 'ascending'
+                        if bvalue.nil?
+                            echo "Invalid value for option '#{option}'"
+                            return
+                        end
+                        filter_opts[:descending] = !bvalue
+                    when 'desc', 'descend', 'descending'
+                        if bvalue.nil?
+                            echo "Invalid value for option '#{option}'"
+                            return
+                        end
+                        filter_opts[:descending] = bvalue
+                    when 'take', 'skip', 'leave'
+                        filter_opts[option.intern] = value.to_i
+                    when 'full', 'nonfull'
+                        sym = option.intern
+                        unless ivalue == 0
+                            filter_opts[:full] = 0 unless filter_opts.include?(:full)
+                            filter_opts[:nonfull] = 0 unless filter_opts.include?(:nonfull)
+                        end
+                        if value == 'all'
+                            filter_opts[sym] = nil
+                        elsif ivalue.nil?
+                            echo "Invalid value for option '#{option}'"
+                            return
+                        else
+                            filter_opts[sym] = ivalue
+                        end
+                    else
+                        echo "Unknown option '#{option}'"
+                end
+            }
+        end
+
+        jar_export = proc{|gemstr, after|
+            if gemstr == 'all'
+                gems = nil
+            elsif gemstr.length > 0
+                gems = gemstr.split(/\s*[|;,\/]\s*/)
+            else
+                echo "Need to specify something to dump, or ALL for all"
+                return
+            end
+            Thread.new {
+                jars = flatten_query(do_query(gems, empty: false, **filter_opts).value)
+                echo jars.inspect
+                dump_future(after.call(jars))
+            }
+        }
+
         case command
             when 'reset', 'restart', 'reload'
                 dump_future(do_reload(argline))
                 return
+            when 'refresh'
+                dump_future(do_refresh(argline.downcase == 'force'))
+                return
             when 'jar'
                 if args.length == 0
-                    dump_future(self.do_jar_item)
+                    dump_future(self.do_jar_item(**jar_opts))
                     return nil
                 end
                 maxfilled = nil
                 only_existing = false
 
-                newargs = []
-                args.each{|arg|
-                    if arg =~ /^(?:count|max(?:filled)?)=(\d+)$/i
-                        maxfilled = val.to_i
-                    elsif arg =~ /^empty=(.+)$/
-                        val = $1
-                        if val =~ /^(?:yes|y|1|t|true)$/
-                            only_existing=false
-                        elsif val =~ /^(?:yes|y|1|t|true)$/
-                            only_existing=false
-                        else
-                            echo "Unknown value for 'empty'"
-                            return
-                        end
-                    elsif arg.include?('=')
-                        echo "Unknown or invalid configuration option #{arg}"
-                        return
-                    else
-                        newargs << arg
-                    end
-                }
-                args = newargs
-
                 case args[0].downcase
                     when 'right'
-                        dump_future(self.do_jar_item(GameObj.right_hand))
+                        dump_future(self.do_jar_item(GameObj.right_hand, **jar_opts))
                         return nil
                     when 'left'
-                        dump_future(self.do_jar_item(GameObj.left_hand))
+                        dump_future(self.do_jar_item(GameObj.left_hand, **jar_opts))
                         return nil
                     when 'item'
                         if args.length == 1
-                            dump_future(self.do_jar_item)
+                            dump_future(self.do_jar_item, **jar_opts)
                             return
                         end
                         name = args[1..-1].join(' ')
                         fput "get #{name}"
                         waitre(/<right|left|^Get what\?$|You already have that/, 10)
-                        dump_future(self.do_jar_item)
+                        dump_future(self.do_jar_item, **jar_opts)
                         return
                     when 'container'
                         if args.length == 1
@@ -1222,22 +1386,23 @@ module Jarserve2
                             return
                         end
                         name = args[1..-1].join(' ')
-                        dump_future(do_jar_container(name))
+                        dump_future(do_jar_container(name, **jar_opts))
                         return
                     else
                         echo "Jar what?"
                         return
                 end
             when 'query'
+                echo filter_opts.inspect
                 if args.length == 0
-                    fut = do_query
+                    fut = do_query(**filter_opts)
                 else
-                    fut = do_query(argline.split(/\s*[|;,\/]\s*/))
+                    fut = do_query(argline.split(/\s*[|;,\/]\s*/), **filter_opts)
                 end
 
                 fut.then{|fut|
                     if fut.error
-                        echo "#{f.error.inspect}\n#{f.error.backtrace.join("\n")}"
+                        echo "#{fut.error.inspect}\n#{fut.error.backtrace.join("\n")}"
                         next
                     end
 
@@ -1245,14 +1410,15 @@ module Jarserve2
                     totaljars = 0
                     output = []
                     fut.value[:jars].map{|k,jars|
-                        name = (k.plural or k.name)
-                        name = "#{$2}, #{$1}" if name =~ /^(?:(.*)\s+)(\S*)$/
-                        # if $1
-                        #     name = "$2, $1"
-                        # else
-                        #     name = $12
-                        #
-                        # end
+                        name = k.noun_first_plural
+                        # (k.plural or k.name)
+                        # name = "#{$2}, #{$1}" if name =~ /^(?:(.*)\s+)(\S*)$/
+                        # # if $1
+                        # #     name = "$2, $1"
+                        # # else
+                        # #     name = $12
+                        # #
+                        # # end
 
                         maxlen = name.length if name.length > maxlen
                         n = jars.num
@@ -1287,16 +1453,28 @@ module Jarserve2
                 echo "Drop how many of what?"
             when 'give'
                 if argline =~ /^(\S+)\s+(\d+|all)\s+(.+?)\s*$/
-                    dump_future(do_give_gems($1, gem: $3, count: ($2 == 'all') ? nil : $2.to_i))
+                    dump_future(do_give_items($1, gem: $3, count: ($2 == 'all') ? nil : $2.to_i))
                     return
                 end
                 echo "Give whom how many of what?"
             when 'move'
                 if argline =~ /^(\d+|all)\s+(.+?)\s+to\s+(.+)$/
-                    dump_future(do_move_gems($3, gem: $2, count: ($1 == 'all') ? nil : $1.to_i))
+                    dump_future(do_move_items($3, gem: $2, count: ($1 == 'all') ? nil : $1.to_i))
                     return
                 end
                 echo "Move how many of what to where?"
+            when 'dropjar', 'dropjars'
+                jar_export.call(argline, proc {|jars| do_drop_items(jars: jars)})
+                when 'givejar', 'givejars'
+                whom, argline = argline.split(/\s+/, 2)
+                jar_export.call(argline, proc {|jars| do_give_items(whom, jars: jars)})
+            when 'movejar', 'movejars'
+                if argline =~ /^(.+)\s+to\s+(.+)$/
+                    jar_export.call($1, proc {|jars| do_move_items($2, jars: jars)})
+                else
+                    echo "Move how many of what to where?"
+                    return
+                end
             else
                 echo "Unknown command '#{command}'"
         end
@@ -1381,6 +1559,7 @@ module Jarserve2
     end
 
     def self.do_reload(delay=0)
+        delay = 0 unless delay
         return self.queue_task{
             start_exec_script("Script.kill('jarserve2'); wait_while{Script.running?('jarserve2')}; sleep #{delay}; start_script 'jarserve2'")
         }
@@ -1412,46 +1591,54 @@ module Jarserve2
             container = nil
             jars_found = Set.new
 
-            # Parse results into jars and start queueing refreshes.
-            data.each{|xml|
-                next unless xml =~ PATTERNS[:invfull]
-                case $~[:depth].length
-                    when 2
-                        container = $~[:exist]
-                    when 6
-                        unless container
-                            echo "Cannot handle inventory line #{xml.inspect} because no parent container was found yet."
-                            next
-                        end
-                        item = item_from_match($~, '')
-                        next unless is_jar?(item)
+            hook = self.anon_hook('refresh')
 
-                        jars_found << item.id
+            begin
+                DownstreamHook.add(hook, proc{|line| line unless line =~ PATTERNS[:jarstatus]})
 
-                        jar = @jars[item.id]
-                        if item.after_name =~ PATTERNS[:jarcontaining]
-                            gem = Gem.many($1)
-                            unless jar
-                                refresh(self.add(Jar.new(item.id, gem, container)))
+                # Parse results into jars and start queueing refreshes.
+                data.each{|xml|
+                    next unless xml =~ PATTERNS[:invfull]
+                    case $~[:depth].length
+                        when 2
+                            container = $~[:exist]
+                        when 6
+                            unless container
+                                echo "Cannot handle inventory line #{xml.inspect} because no parent container was found yet."
                                 next
                             end
+                            item = item_from_match($~, '')
+                            next unless is_jar?(item)
+
+                            jars_found << item.id
+
+                            jar = @jars[item.id]
+                            if item.after_name =~ PATTERNS[:jarcontaining]
+                                gem = Gem.many($1)
+                                unless jar
+                                    refresh(self.add(Jar.new(item.id, gem, container)))
+                                    next
+                                end
+                            else
+                                gem = nil
+                                self.add(Jar.new(item.id, nil, container)) unless jar
+                            end
+
+                            oldgem = jar.gem
+                            jar.gem = gem
+                            refresh(jar) if gem and (task[:force] or gem != oldgem)
                         else
-                            gem = nil
-                            self.add(Jar.new(item.id, nil, container)) unless jar
-                        end
+                            nil # noop
+                    end
+                }
 
-                        oldgem = jar.gem
-                        jar.gem = gem
-                        refresh(jar) if gem and (task[:force] or gem != oldgem)
-                    else
-                        nil # noop
-                end
-            }
+                @jars.each{|k,v| self.remove(v) unless jars_found.include?(k) }
 
-            @jars.each{|k,v| self.remove(v) unless jars_found.include?(k) }
-
-            getevent(:jarupdate) until @refresh_inflight.empty? and @refresh_pending.empty?
-            next(Time.now - started)
+                getevent(:jarupdate) until @refresh_inflight.empty? and @refresh_pending.empty?
+                next(Time.now - started)
+            ensure
+                DownstreamHook.remove(hook)
+            end
         }
     end
 
@@ -1668,7 +1855,62 @@ module Jarserve2
         }
     end
 
-    def self.do_query(gems=nil)
+    def self.do_query(gems=nil, empty: nil, **filters)
+        # Return information on gems and what gemsets are holding them.
+        if empty and gems
+            raise JarError("Query criteria should not specify both 'gems' and a truthy value for 'empty'")
+        end
+        self.queue_task{
+            if empty
+                next {
+                    :notfound => nil,
+                    :jars => nil,
+                    :empty => self.empty.filter?(**filters).snapshot
+                }
+            end
+            if gems
+                gems = [gems].flatten
+            else
+                gems = @gems.keys
+            end
+
+            notfound = Set.new
+            stats = {}
+
+            Set.new(gems.map {|item|
+                next(item) if item.is_a?(Gem)
+                resolved = self.resolve_gem(item)
+                notfound << item if resolved.length == 0
+                next(resolved)
+            }.flatten).each{|gem|
+                next unless gem
+                jars = @gems[gem]
+                if jars.length == 0
+                    notfound << gem
+                    next
+                end
+                filtered = @gems[gem].filter?(**filters)
+                stats[gem] = filtered.snapshot if filtered.length > 0
+
+            }
+
+            next {
+                :notfound => notfound,
+                :jars => stats,
+                :empty => empty.nil? ? self.empty.filter?(**filters).snapshot : nil
+            }
+        }
+    end
+
+    def self.flatten_query(query)
+        result = Set.new
+        query[:jars].each_value{|jars| jars.each{|jar| result << jar}} if query[:jars]
+        query[:empty].each_value{|jar| result << jar} if query[:empty]
+        return result
+    end
+
+    def self.do_query_jars(gems=nil, **filters)
+        # Return a flattened list of jars matching the specified query.  GemSets are not included.
         return self.queue_task{
             if gems
                 gems = [gems].flatten
@@ -1691,7 +1933,7 @@ module Jarserve2
                     notfound << gem
                     next
                 end
-                stats[gem] = @gems[gem].snapshot
+                stats[gem] = @gems[gem].filter?(**filters).snapshot
             }
 
             next {
@@ -1762,7 +2004,7 @@ module Jarserve2
                     end
                     unless jar
                         begin
-                            jar = jar_for(gem, event[:maxfilled], event[:only_existing])
+                            jar = jar_for(gem, **jar_opts)
                         rescue OutOfJarsError
                             fail_rest = :noroom
                             result[:errors][item] = :noroom
@@ -1903,21 +2145,23 @@ module Jarserve2
     def self.xfer_jars(jars)
         raise JarError.new("A list of jars must be specified.") unless jars
         return [] unless jars.length > 0
-
-        begin
-            moved = []
-            jars.each{|jar|
+        jar = nil
+        moved = []
+        jars.each{|jar|
+            begin
                 jar.retrieve
                 if yield(jar)
                     moved << jar
                 else
                     break
                 end
-            }
-            return moved
-        ensure
-            stash(jar)
-        end
+            rescue => ex
+                stash(jar)
+                return moved
+                raise ex
+            end
+        }
+        return moved
     end
 end
 
