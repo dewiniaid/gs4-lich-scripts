@@ -25,9 +25,14 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.6.2 (2017-06-69)
+  version: 0.7 (2017-07.24)
 
   changelog:
+    version 0.7 (2017-07-24)
+      * Add waitmana, waithealth, waitspirit, and waitstamina commands.
+      * Change suggestions for GameObjAdd and GameObjAddMore to use xmlpatch instead.
+      * Automatically migrade to xmlpatch on startup if GameObjAddMore is present.
+
     version 0.6.2 (2017-06-29)
       * Fix an issue where every command after a script would be interpreted as a script.
 
@@ -118,8 +123,8 @@
 =end
 
 module ForeachScript
-    VERSION = '0.6.2 (2017-06-29)'
-    CONFIG_VERSION = 1
+    VERSION = '0.7 (2017-07-24)'
+    CONFIG_VERSION = 2
     FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
     INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|There is nothing [io]n there|That is closed.|I could not find what you were referring to\./
     HOOK = 'foreach_script_temp_hook'
@@ -179,9 +184,27 @@ module ForeachScript
             end
         }
 
+        unless force
+            if GameSettings['version'] == 1
+                echo "Migrating settings from a previous version of Foreach..."
+                if Script.exists?('GameObjAddMore.lic')
+                    unless Script.exists?('xmlpatch.lic')
+                        echo "You have GameObjAddMore installed, which is deprecated and will be removed soon."
+                        echo "The script 'xmlpatch' replaces it.  I'll go install that for you now."
+
+                        Script.run('repository', 'download xmlpatch.lic')
+                        Script.run('xmlpatch')
+                    end
+                    echo "Done!"
+                    puts "\nTo see what's new in this verison and view examples on how to use #{$lich_char}foreach, read the following:"
+                    respond "    #{HELP_URL}"
+                    GameSettings['version'] = CONFIG_VERSION
+                    return
+                end
+            end
+        end
 
         echo "Starting one time setup..."
-        clear
 
         msg = ["**Welcome to ForEach version #{VERSION}**"]
         msg << "**#{'-' * (msg[0].length-4)}**"
@@ -203,6 +226,7 @@ module ForeachScript
             response = unique_get.strip.downcase
             if response =~ /^y(?:es)?$/
                 Script.run('repository', "set-updatable #{@script.name}.lic")
+                Script.run('autostart', "add --global repository download-updates")
                 respond "If you change your mind later, enter #{$lich_char}repository unset-updatable #{@script.name}.lic"
                 break
             elsif response =~ /^no?$/
@@ -224,108 +248,34 @@ module ForeachScript
                 " the data included in Lich is a bit outdated so some items may have the wrong type -- or have no type",
                 " at all.\n",
                 "\n",
-                "There's a third-party script called GameObjAdd that is designed to run on startup and add updated item",
-                " type data to Lich.  The script exits afterwards and requires no additional resources beyond that point.",
-                "  If you use Bigshot or some other scripts, you may already have this set up.",
+                "I've written a script called 'xmlpatch' that is designed to run on startup and update Lich's data",
+                " about spells and items.  This script exits afterwards and requires no additional resources beyond that",
+                " point.\n",
                 "\n",
-                "Would you like me to setup GameObjAdd for you?\n",
+                "'xmlpatch' replaces and supercedes similar scripts like GameObjAdd and GameObjAddMore.\n",
+                "\n",
+                "Would you like me to setup xmlpatch for you?\n"
             ].join('')
             option.call('yes')
             option.call('no')
             option.call('info')
             response = unique_get.strip.downcase
             if response =~ /^y(?:es)?$/
-                Script.run('repository', "download GameObjAdd.lic")
-                Script.run('autostart', "add --global GameObjAdd")
-                Script.run('GameObjAdd')
+                Script.run('repository', "download xmlpatch.lic")
+                Script.run('xmlpatch')
                 gameobjadd = true
 
-                respond "If you change your mind later, you can remove GameObjAdd from Autostart with: ${lich_char}autostart remove --global GameObjAdd"
+                # respond "If you change your mind later, you can remove GameObjAdd from Autostart with: ${lich_char}autostart remove --global GameObjAdd"
                 break
             elsif response =~ /^no?$/
                 respond "If you change your mind later, enter the following commands:"
-                respond "#{$lich_char}repository download GameObjAdd"
-                respond "#{$lich_char}repository set-updatable GameObjAdd"
-                respond "#{$lich_char}autostart add --global GameObjAdd"
+                respond "#{$lich_char}repository download xmlpatch.lic"
+                respond "#{$lich_char}xmlpatch"
                 break
             elsif response =~ /^(?:info|help|details)$/
-                Script.run('repository', 'info GameObjAdd.lic')
+                Script.run('repository', 'info xmlpatch.lic')
             else
                 echo 'Please answer YES, NO or INFO'
-            end
-        end
-
-        while gameobjadd
-            puts "Would you like Lich to check for updates to GameObjAdd on startup?\n"
-            option.call('yes')
-            option.call('no')
-            response = unique_get.strip.downcase
-            if response =~ /^y(?:es)?$/
-                Script.run('repository', "set-updatable GameObjAdd.lic")
-                respond "If you change your mind later, enter #{$lich_char}repository unset-updatable GameObjAdd.lic"
-                break
-            elsif response =~ /^no?$/
-                Script.run('repository', "unset-updatable GameObjAdd.lic")
-                respond "If you change your mind later, enter #{$lich_char}repository set-updatable GameObjAdd.lic"
-                break
-            else
-                echo 'Please answer YES or NO'
-            end
-        end
-
-
-        while true
-            puts [
-                     "In addition to GameObjAdd, I've written a script called GameObjAddMore that makes some further",
-                     " refinements to Lich's item type data.  It is an addition to GameObjAdd and is not a replacement for it.\n",
-                     "\n",
-                     "The current version of GameObjAddMore (as if this version of Foreach) mainly refines the criteria for",
-                     " what counts as a 'box', and adds a 'phased' category (items beginning with 'shifting').\n",
-                     "\n",
-                     "Like GameObjAdd, GameObjAddMore runs at startup, does its thing, and then immediately exits.\n",
-                     "\n",
-                     "Would you like me to setup GameObjAddMore for you?\n",
-                 ].join('')
-            option.call('yes')
-            option.call('no')
-            option.call('info')
-            response = unique_get.strip.downcase
-            if response =~ /^y(?:es)?$/
-                Script.run('repository', "download GameObjAddMore.lic")
-                Script.run('autostart', "add --global GameObjAddMore")
-                Script.run('GameObjAddMore')
-                gameobjaddmore = true
-
-                respond "If you change your mind later, you can remove GameObjAddMore from Autostart with: ${lich_char}autostart remove --global GameObjAddMore"
-                break
-            elsif response =~ /^no?$/
-                respond "If you change your mind later, enter the following commands:"
-                respond "#{$lich_char}repository download GameObjAddMore"
-                respond "#{$lich_char}repository set-updatable GameObjAddMore"
-                respond "#{$lich_char}autostart add --global GameObjAddMore"
-                break
-            elsif response =~ /^(?:info|help|details)$/
-                Script.run('repository', 'info GameObjAddMore.lic')
-            else
-                echo 'Please answer YES, NO or INFO'
-            end
-        end
-
-        while gameobjaddmore
-            puts "Would you like Lich to check for updates to GameObjAddMore on startup?\n"
-            option.call('yes')
-            option.call('no')
-            response = unique_get.strip.downcase
-            if response =~ /^y(?:es)?$/
-                Script.run('repository', "set-updatable GameObjAddMore.lic")
-                respond "If you change your mind later, enter #{$lich_char}repository unset-updatable GameObjAddMore.lic"
-                break
-            elsif response =~ /^no?$/
-                Script.run('repository', "unset-updatable GameObjAddMore.lic")
-                respond "If you change your mind later, enter #{$lich_char}repository set-updatable GameObjAddMore.lic"
-                break
-            else
-                echo 'Please answer YES or NO'
             end
         end
 
@@ -400,6 +350,12 @@ module ForeachScript
             msg << "    **WAITRT**                         - Wait for roundtime to finish.  Hangs if not in roundtime."
             msg << "    **WAITFOR <phrase>**               - Waits to see the specified phrase.  Case insensitive."
             msg << "    **WAITRE <pattern>**               - Waits to see the specified regular expression."
+            msg << "    **WAITMANA <#>** or **WAITMP <#>**     - Waits until you have at least this much mana."
+            msg << "    **WAITHEALTH <#>** or **WAITHP <#>**   - Waits until you have at least this much mana."
+            msg << "    **WAITSPIRIT <#>** or **WAITSP <#>**   - Waits until you have at least this much stamina."
+            msg << "    **WAITSTAMINA <#>** or **WAITST <#>**  - Waits until you have at least this much spirit."
+            msg << "    **WAITFOR <phrase>**               - Waits to see the specified phrase.  Case insensitive."
+            msg << "    **WAITRE <pattern>**               - Waits to see the specified regular expression."
             msg << ''
             msg << "There are some other convenience shortcuts with certain regular game commands, details are in the online documentation."
             msg << "#{name} is blind to closed containers."
@@ -411,7 +367,7 @@ module ForeachScript
         else
             msg << "**ATTRIBUTEs** include **type**(default), **noun**, **name**, **fullname**, or shorthand equivalents **t**, **n**, **m**, and **f**"
             msg << "**TARGETs** include any inventory container or **INV**, **WORN**, **ROOM**, **LOOT**, and **LAST** (and various synonyms listed in the full help)"
-            msg << "**COMMANDs** are any game command, or convenience shortcuts **ECHO**, **GIVEITEM**, **STASH**, **FASTMOVE**, **MOVE**, **PAUSE**, **WAITRT**, **WAITFOR** and **WAITRE**"
+            msg << "**COMMANDs** are any game command, or convenience shortcuts **ECHO**, **GIVEITEM**, **STASH**, **FASTMOVE**, **MOVE**, **PAUSE**, **WAITRT**, **WAITFOR**, **WAITRE**, **WAITMANA**, **WAITHEALTH**, **WAITSPIRIT**, and **WAITSTAMINA**"
             msg << ''
         end
 
@@ -555,6 +511,13 @@ module ForeachScript
                 return proc {|item| item.noun =~ pattern}
             else
                 return nil
+        end
+    end
+
+    def self.wait_block(message, target, valueproc)
+        if valueproc.call < target
+            echo message
+            wait_until { valueproc.call >= target }
         end
     end
 
@@ -922,6 +885,26 @@ module ForeachScript
                         #     put "put #{what} in #{where}"
                         #     waitfor '<right>', '<left>' unless holding
                         #     waitfor '<right>', '<left>'
+                        elsif command =~ /^wait(?:mana|mp) (-?\d+)$/
+                            before_next.call if before_next
+                            before_next = nil
+                            n = $1.to_i
+                            self.wait_block("Waiting for #{n} mana...", n, proc { XMLData.mana })
+                        elsif command =~ /^wait(?:health|hp) (-?\d+)$/
+                            before_next.call if before_next
+                            before_next = nil
+                            n = $1.to_i
+                            self.wait_block("Waiting for #{n} HP...", n, proc { XMLData.health })
+                        elsif command =~ /^wait(?:spirit|sp) (-?\d+)$/
+                            before_next.call if before_next
+                            before_next = nil
+                            n = $1.to_i
+                            self.wait_block("Waiting for #{n} spirit...", n, proc { XMLData.spirit })
+                        elsif command =~ /^wait(?:stamina|st) (-?\d+)$/
+                            before_next.call if before_next
+                            before_next = nil
+                            n = $1.to_i
+                            self.wait_block("Waiting for #{n} stamina...", n, proc { XMLData.stamina })
                         elsif command =~ /^stash (.*$)/i
                             what = $1
                             success = false
