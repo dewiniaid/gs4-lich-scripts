@@ -71,7 +71,7 @@ script.want_downstream_xml = true
 
 
 module Jarserve2
-    DEBUG_EVENTS = 2
+    DEBUG_EVENTS = 0
 
     class Gem
         CACHE = {}
@@ -253,7 +253,7 @@ module Jarserve2
             return result if (full == 0 or -full >= len) and (nonfull == 0 or -nonfull >= len)
             jars = self.sort(descending: descending)
             return self if skip == 0 and leave == 0 and take >= len and full >= len and nonfull >= len
-            echo "Gem=#{self.gem.to_s}.  skip=#{skip} take=#{take} leave=#{leave}.  Jars=#{jars.map{|x| x.full? ? '!' : '.'}.join('')}"
+            #echo "Gem=#{self.gem.to_s}.  skip=#{skip} take=#{take} leave=#{leave}.  Jars=#{jars.map{|x| x.full? ? '!' : '.'}.join('')}"
 
             # skip, leave = leave, skip if descending  # So we can always assume full jars will be last.
 
@@ -273,7 +273,7 @@ module Jarserve2
             leave = [leave, len - skip - take].max
             return result if skip+leave >= len
 
-            echo "Gem=#{@gem.to_s}.  skip=#{skip} take=#{take} leave=#{leave}.  Jars=#{jars.map{|x| x.full? ? '!' : '.'}.join('')}"
+            #echo "Gem=#{@gem.to_s}.  skip=#{skip} take=#{take} leave=#{leave}.  Jars=#{jars.map{|x| x.full? ? '!' : '.'}.join('')}"
 
             if skip > 0 or leave > 0
                 skip, leave = leave, skip if descending
@@ -735,7 +735,7 @@ module Jarserve2
         # Giving items to another player
         :offer_started => /^You offer your .* to <a exist="(?<to_player_id>-?\d+)" noun="(?<to_player>[^"]+)">.*, who has 30 seconds to accept the offer/,
         
-        :offer_failed => /^(?:You may only have one outstanding offer at a time.|To whom\?)\s*$/,
+        :offer_failed => /^(?:You may only have one outstanding offer at a time\.|To whom\?)\s*$/,
     
         :offer_declined => /^<a exist="(?<to_player_id>-?\d+)" noun="(?<to_player>[^"]+)">.+<\/a> has declined the offer.$/,
 
@@ -968,21 +968,19 @@ module Jarserve2
             end
 
             if is_jar?(item)
-                echo "#{item} is a jar."
                 jar = event[:jar] = @jars[item.id]
                 if event[:remove] and jar
                     remove(jar)
                 elsif event[:add] and not jar
                     echo "Adding jar?"
-                    if item.after_name.length > 0
-                        if item.after_name =~ /^containing (.*)/
-                            gem = Gem.many($1)
-                        else
-                            gem = nil
-                        end
-                        jar = event[:jar] = add(Jar.new(item.id, gem, nil))
+                    if item.after_name.length > 0 and item.after_name =~ /^containing (.*)/
+                        gem = Gem.many($1)
                         refresh(jar)
+                    else
+                        gem = nil
                     end
+                    jar = event[:jar] = add(Jar.new(item.id, gem, nil))
+                    refresh(jar) if gem
                 end
             end
             return event
@@ -1194,6 +1192,10 @@ module Jarserve2
         respond "#{exc}\n#{exc.backtrace.join("\n")}"
     end
 
+    def self.wait_until_ready
+        @ready_future.value
+    end
+
     def self.run(script)
         @script = script
         @itemcache = {}
@@ -1212,6 +1214,9 @@ module Jarserve2
         @refreshlock = Mutex.new
         @lock = Mutex.new
 
+        @ready_future = Future.new
+
+
         before_dying { cleanup }
 
         # Create our downstream XML ingest hook.
@@ -1221,7 +1226,10 @@ module Jarserve2
         })
 
         # Add our initial refresh task to the queue
-        self.do_refresh(true).then {|fut| echo "Initial scan completed in #{fut.value} seconds." }
+        self.do_refresh(true).then {|fut|
+            echo "Initial scan completed in #{fut.value} seconds."
+            @ready_future.value = true
+        }
 
         # Consruct the regex for the upstream hook
         command_pattern = /^(?:<c>)?#{Regexp::escape($lich_char)}(?:js2|jarserve2)(?:\s+(\S+)((?:\s+\S+=\S*)+)?(?:\s+(.*?))?)?\s*$/
@@ -2045,7 +2053,6 @@ module Jarserve2
                 fput "give ##{item.id} to #{whom}"
                 nil until get =~ /(?:#{PATTERNS[:offer_started]})|(?:#{PATTERNS[:offer_failed]})/
                 unless $~[:to_player]
-                    stash(jar)
                     raise JarError.new('Failed to give item: Unknown player or offer already pending.')
                 end
 
@@ -2070,7 +2077,7 @@ module Jarserve2
                 id = self.resolve_container(container)
             end
             raise JarError.new("Failed to find specified container") unless id
-            next self.xfer_items(**what)
+            next self.xfer_items(**what){|item| fput "put ##{item.id} in ##{id}" }
         }
     end
 
@@ -2104,7 +2111,11 @@ module Jarserve2
         # We technically want least filled, but we'll do that from taking the last element of this.
         jars = @gems[gem].most_filled(true)
 
-        moved = []
+        result = {
+            :items => [],
+            :status => count ? :incomplete : :ok,
+            :gem => gem
+        }
 
         jar = jars.pop
         jar.retrieve
@@ -2129,17 +2140,22 @@ module Jarserve2
                 end
 
                 if yield(e[:item])
-                    moved << e[:item]
+                    result[:items] << e[:item]
                     count -= 1 if count
                 else
                     fput "put ##{e[:item].id} in #{jar.ref}"
+                    result[:status] = :aborted
                     break
                 end
             end
         ensure
             stash(jar) if jar
         end
-        return moved
+        if count == 0
+            result[:status] = :ok
+        end
+
+        return result
     end
 
     def self.xfer_jars(jars)

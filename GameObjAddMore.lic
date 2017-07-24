@@ -23,7 +23,9 @@
 
 wait_while { running?('repository')}
 
-GameObj.load_data
+sleep 2
+
+GameObj.load_data if GameObj.type_data.empty? or GameObj.type_data.nil?
 
 sleep 1  # Avoid race conditions if GameObjAdd is also running.  This is hacky, but should work.
 
