@@ -1,4 +1,4 @@
-# Foreach 0.6
+# Foreach 0.7
 
 *Stop the up-up-up-enter!*
 
@@ -204,4 +204,19 @@ In addition, the following convenience shortcuts exist:
   
 * **waitre** _pattern_  
   Like **waitfor**, but accepts a regular expression instead.  
+  
+* **waitmana** _amount_ or **waitmp** _amount_  
+  Waits until you have at least this much mana.
+  
+* **waithealth** _amount_ or **waithp** _amount_  
+  Waits until you have at least this many health points.
+  
+* **waitspirit** _amount_ or **waitsp** _amount_  
+  Waits until you have at least this much spirit.
+  
+* **waitstamina** _amount_ or **waitst** _amount_  
+  Waits until you have at least this much stamina.
+  
+    
+  
   
