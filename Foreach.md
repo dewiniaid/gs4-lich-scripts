@@ -22,7 +22,7 @@ While not a full replacement for "proper" purpose-built Lich scripts, it is stil
 
 * Checking for orb gems?  
   Sorcerer: `;foreach gem in queue bag;get item;waitmana 4;prep 704;cast item;pause;put item in reject bag`  
-  Bard using `;loresing`: `;foreach gem in queue bag;get item;waitmana4;;loresing purpose noun;pause;put item in reject bag`  
+  Bard using `;loresing`: `;foreach gem in queue bag;get item;waitmana 4;;loresing purpose noun;pause;put item in reject bag`  
   While the script is paused, put the gem in the orb bag if it's an orb.  ;unpausing it will put it in the reject bag if you're still holding it.
 
 * Bulk reading scrolls?  
