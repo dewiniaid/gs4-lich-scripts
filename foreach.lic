@@ -25,9 +25,22 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.9.9 (2019-05-24)
+  version: 0.10 (2019-06-19)
 
   changelog:
+    version 0.10 (2019-06-10)
+      * Foreach now reports its status to the shortcut bar in Stormfront, and can be paused, unpaused and killed from
+        that location.
+      * You can now ;foreach ... under|behind ...  instead of just ;foreach ... in   and ;foreach ... on
+      * Pattern matching is no longer case-sensitive.
+        ;foreach q=elan*pack in pack should match "an Elanthian Guilds voucher pack"
+      * `;foreach sorted ... in ...` will iterate over items alphabetically within their respective containers.
+        Articles a/an/some/the are ignored when sorting.  The order of which container is evaluated first is unchanged.
+      * `;foreach reversed ... in ...` will iterate over items backwards within their respective containers.
+        This can be used to avoid changing container/room order, or in conjunction with 'sorted' to sort descending.
+      * Completely overhauled the item matching engine to make it easier to maintain going forward.
+      * `;foreach type=none in ...` will now match items that have no explicit type."
+
     version 0.9.9 (2019-05-24)
       * Add UNMARK shortcut for MARK <item> REMOVE
       * Improved documentation, including updating the online documentation
@@ -82,25 +95,28 @@
 
 # [JUST UPDATED] ;foreach 0.9, featuring filtering by marked/registered status, faster scans of premium lockers, and automatic locker opening/closing.  ;repo info foreach -- ;repo download foreach -- ;foreach help
 
-module ForeachScript
-    VERSION = '0.9.9 (2019-05-24)'
-    CONFIG_VERSION = 2
-    FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+([io]n)\s+)|([io]n)\s+)(.+)$/
-    INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|(There is nothing [io]n the|That is closed.|I could not find what you were referring to\.)/
-    HOOK = 'foreach_script_temp_hook'
+# [JUST UPDATED] ;foreach 0.9, featuring filtering by marked/registered status, faster scans of premium lockers, and automatic locker opening/closing.  ;repo info foreach -- ;repo download foreach -- ;foreach help
+
+EXPERIMENTAL_EXPIRES = nil
+# EXPERIMENTAL_EXPIRES = Time.at(1560644027)
+
+class ItemMatcher
+    attr_accessor :first, :after, :unique, :sorted, :reversed, :item_filter
+    attr_reader :total_items, :status_filter
+    attr_reader :container_names, :container_contents
+
     HELP_URL = "https://github.com/dewiniaid/gs4-lich-scripts/blob/master/Foreach.md"
+    UNREGISTERED = 1 << 0
+    REGISTERED = 1 << 1
+    UNMARKED = 1 << 2
+    MARKED = 1 << 3
 
     INVFULL_PATTERN = /^( {2,})([^<]*)<a exist="(-?\d+)" noun="([^"]*)">([^<]*)<\/a>(?: ([^(]*)(?:$|(?= \()))?(?: (\(.*\)))?$/
     # Matches: 1 = leading space, 2 = prename, 3 = id, 4 = noun, 5 = name, 6 = postname, 7 = registered/marked attributes
     # You are carrying nothing at this time.  -- no inventory
 
-    CONTAINER_UPDATE_INTERVAL = 10  # How often do we notify how many more containers are being scanned
-    ITEM_UPDATE_INTERVAL = 10  # How often do we notify how many more items are being processed?
-
-    COMMAND_PATTERNS = {
-        :move => /^(f(?:ast)?)?(?:move|mv)\s+(?:(.+)\s+)?to\s+(.*)$/i,
-    }
-
+    # INV_PATTERN = /(?:(?:Peering into|[IO]n) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|(There is nothing [io]n the|That is closed.|I could not find what you were referring to\.)/
+    INV_PATTERN = /(?:(?:Peering into|In|On|Under|Behind) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|(There is nothing (?:in|on|under|behind) the|That is closed.|I could not find what you were referring to\.)/
     LOCKER_PATTERNS = {
         :start => /^(?:(Looking in front of you, you see)|Thinking back, you recall) the contents of your locker/,
         :end => /^Obvious items:|^There are no items in this locker./,
@@ -109,25 +125,494 @@ module ForeachScript
         :town_locales => /(Landing|Illistim|Vaalor|Mist Harbor|Kharam|Teras|Icemule|Solhaven|River's Rest)/
     }
 
-    PREMIUM_LOCKER_CONTAINERS = ['armor stand', 'weapon rack', 'magical item bin', 'clothing wardrobe', 'deep chest'].to_set
+    def initialize(first: nil, after: nil, unique: false, sorted: false, reversed: false, marked: nil, registered: nil)
+        @first = first
+        @after = after
+        @unique = unique
+        @sorted = sorted
+        @reversed = reversed
 
-    UNREGISTERED = 1 << 0
-    REGISTERED = 1 << 1
-    UNMARKED = 1 << 2
-    MARKED = 1 << 3
+        @item_filter = nil
+        @status_filter = 0
 
-    # class ForeachOptions
-    #     @unique = nil
-    #     @marked = nil
-    #     @registered = nil
-    #     @first = nil
-    #     @last = nil
+        self.marked = marked
+        self.registered = registered
+
+        @container_names = {}
+        @container_contents = {}
+        @item_statuses = {}
+
+        @pending_ingests = {}
+
+        @scanned_inv = false
+        @scanned_hands = false
+        @scanned_locker  = false
+
+        @seen_ids = Set.new
+
+        @total_items = nil
+
+        @command_cache = {}
+    end
+
+    def add_item!(item, container, container_name=nil, status_text=nil)
+        return unless @seen_ids.add?(item.id)
+        (@container_contents[container] ||= []) << item
+        @container_names[container] ||= container_name
+
+        @item_statuses[item.id] = ItemMatcher.status_from_text(status_text) if status_text
+
+        return item
+    end
+
+    def add_item(item, container_id, container_name=nil, status_text=nil)
+        return nil if @item_filter and not @item_filter.call(item)
+        return add_item!(item, container_id, container_name)
+    end
+
+    def marked
+        return true if (@status_filter & MARKED) != 0
+        return false if (@status_filter & UNMARKED) != 0
+        return nil
+    end
+
+    def marked=(v)
+        @status_filter &= (MARKED|UNMARKED)
+        @status_filter |= MARKED if v == true
+        @status_filter |= UNMARKED if v == false
+    end
+
+    def registered
+        return true if (@status_filter & REGISTERED) != 0
+        return false if (@status_filter & UNREGISTERED) != 0
+        return nil
+    end
+
+    def registered=(v)
+        @status_filter &= (REGISTERED|UNREGISTERED)
+        @status_filter |= REGISTERED if v == true
+        @status_filter |= UNREGISTERED if v == false
+    end
+
+    def self.status_from_text(text)
+        value = 0
+        return UNREGISTERED | UNMARKED unless text
+        if text =~ /registered/i
+            value |= REGISTERED
+        else
+            value |= UNREGISTERED
+        end
+
+        if text =~ /marked/i
+            value |= MARKED
+        else
+            value |= UNMARKED
+        end
+    end
+
+    def _get_inventory(command)
+        return @command_cache[command] unless @command_cache[command].nil?
+
+        lines = ForeachScript.quiet_command(
+            command,
+            /^(?:You are carrying nothing at this time|You are currently (?:wearing and )?carrying)/,
+            /(?:<prompt)|(?:.*items? displayed\.\)$)/,
+            # /(?:<prompt)|(?:items displayed.\)\b)/,
+            true,
+            5
+        )
+        unless lines
+            echo "Inventory request timed out."
+            exit
+        end
+        return (@command_cache[command] = lines)
+    end
+
+    def _get_locker_containers
+        containers = {}
+        GameObj.loot.each do |item|
+            containers[item.noun] = item if ForeachScript::PREMIUM_LOCKER_CONTAINERS[item.full_name]
+        end
+        return containers if containers.length == ForeachScript::PREMIUM_LOCKER_CONTAINERS.length
+    end
+
+    def _get_locker_town
+        if Room.current and Room.current.id
+            loc = Room.current.location
+        else
+            loc = Map.get_location
+        end
+
+        unless loc
+            echo "Unable to determine what location this locker is in."
+            return nil
+        end
+
+        unless loc =~ LOCKER_PATTERNS[:town_locales]
+            echo "Location of this room is not familiar.  Unable to determine what town this locker is in."
+            return nil
+        end
+
+        return $1
+    end
+
+    def _get_locker_manifest
+        return @command_cache[:locker_manifest] if @command_cache[:locker_manifest]
+        @scanned_locker = true
+        locker_containers = _get_locker_containers
+        return nil unless locker_containers
+        return nil unless (town = _get_locker_town)
+        manifest_command = "locker manifest #{town}"
+        lines = ForeachScript.quiet_command(manifest_command, LOCKER_PATTERNS[:start])
+        unless lines
+            echo "Locker manifest request timed out."
+            exit
+        end
+        to_return = []
+        lines.each do |line|
+            if line =~ LOCKER_PATTERNS[:start]
+                unless $1   # Remote locker, not local locker
+                    echo "Location of this room appears to be incorrect, or your locker is not open."
+                    return nil
+                end
+            elsif line =~ LOCKER_PATTERNS[:end]
+                return @command_cache[:locker_manifest] = to_return
+            elsif line =~ LOCKER_PATTERNS[:container] or line =~ LOCKER_PATTERNS[:item]
+                to_return << line
+            end
+        end
+        echo "Locker manifest read was incomplete"
+        return nil
+    end
+
+    def ingest_locker_from_manifest
+        finished = false
+        locker_containers = _get_locker_containers
+        container_id = container_name = nil
+        lines = _get_locker_manifest
+        return false unless lines
+        lines.each do |line|
+            if line =~ LOCKER_PATTERNS[:container]
+                unless (t = locker_containers[$1])
+                    echo "Unrecognized container noun: #{$1}"
+                    return nil
+                end
+                container_id = t.id
+                container_name = t.full_name
+            elsif line =~ LOCKER_PATTERNS[:item]
+                unless container_id
+                    manifest_command = "locker manifest #{town}"
+                    echo "I found an item in a container before I found my first container.  This shouldn't happen."
+                    echo "Please save a copy of #{manifest_command.upcase} and contact LostRanger"
+                    exit
+                end
+
+                # @item_statuses[item.id] = ItemMatcher.status_from_text($6)
+                add_item(
+                    GameObj.new($2.dup, $3.dup, $4.dup, $1.dup, $5.dup),
+                    container_id, container_name, $6
+                )
+            end
+        end
+        return true
+    end
+
+    def _ingest_inventory(command)
+        container_id = container_name = nil
+        _get_inventory(command).each do |line|
+            next unless line =~ INVFULL_PATTERN
+            case $1.length
+            when 2
+                container_id = $3
+                container_name = $5
+                @item_statuses[container_id] = ItemMatcher.status_from_text($7)
+            when 6
+                unless container_id
+                    echo "I found an item in a container before I found my first container.  This shouldn't happen."
+                    echo "Please save a copy of INV FULL and contact LostRanger"
+                    exit
+                end
+                add_item(
+                    GameObj.new($3.dup, $4.dup, $5.dup, $2.dup, $6.dup),
+                    container_id, container_name, $7
+                )
+            else
+                next
+            end
+        end
+        return true
+    end
+
+    def ingest_inventory
+        @scanned_inv = true
+        return _ingest_inventory('inventory full')
+    end
+
+    def ingest_hands
+        @scanned_hands = true
+        return _ingest_inventory('inventory hands full')
+    end
+
+    def _status_from_inventory(command)
+        _get_inventory(command).each do |line|
+            next unless line =~ INVFULL_PATTERN
+            @item_statuses[$3] = ItemMatcher.status_from_text($7)
+        end
+    end
+
+    def status_from_inventory
+        return if @scanned_inv
+        _status_from_inventory('inventory full')
+    end
+
+    def status_from_hands
+        return if @scanned_hands
+        _status_from_inventory('inventory hands full')
+    end
+
+    def ingest_container(container_id, container_name, items)
+        items.each {|item| add_item(item, container_id, container_name)}
+    end
+
+    def schedule_container(container, location='in')
+        h = (@pending_ingests[container.id] ||= {})
+        h[:item] ||= container
+        (h[:locations] ||= Set.new).add(location)
+        return h
+    end
+
+    def ingest_legacy_locker
+        GameObj.loot.each{|x|
+            if (loc = ForeachScript::PREMIUM_LOCKER_CONTAINERS[x.full_name])
+                schedule_container(x, loc)
+            end
+        }
+    end
+
+    def ingest_loot(location='in')
+        # @pending_ingests += GameObj.loot.map{|item| item.id}
+        GameObj.loot.each{|x| schedule_container(x, location)}
+    end
+
+    def ingest_ground
+        GameObj.loot.each do |item|
+            add_item(item, "_ground", "On the ground")
+        end
+    end
+
+    def ingest_worn
+        GameObj.inv.each do |item|
+            add_item(item, "_worn", "On your person")
+        end
+    end
+
+    def ingest_previous(other)
+        other.container_contents.each do |container_id, items|
+            container_name = other.container_names[container_id]
+            items.each{|item| add_item(item, container_id, container_name)}
+        end
+    end
+
+    def self.quiet_inv_scan_hook(xml)
+        if @in_sorted_view
+            @in_sorted_view = false if xml =~ /Total items: \d+$/
+            return nil
+        end
+
+        return nil if xml =~ /^<prompt|^s*$/
+        return xml unless xml =~ INV_PATTERN
+        @in_sorted_view = true if $3
+        return nil
+        #
+        # (xml =~ INV_PATTERN or xml =~ /^<prompt/ or xml =~ /^\s*$/) ? nil : xml
+    end
+
+    def maybe_fetch_status_data(exist)
+        return true if @status_filter == 0
+        return true if @item_statuses[exist]
+        return fetch_status_data(exist)
+    end
+
+    def fetch_status_data(exist)
+        if GameObj.right_hand.id == exist or GameObj.left_hand.id == exist
+            status_from_hands
+        else
+            status_from_inventory
+            status_from_hands unless @item_statuses[exist]
+        end
+        return @item_statuses[exist] && true
+    end
+
+    def ingest_from_name(target, position='in')
+        begin
+            ForeachScript.stop_scripts
+            xml = dothistimeout("look #{position} #{target}", 15, INV_PATTERN)
+            unless xml =~ INV_PATTERN
+                echo "Timed out waiting for inventory command."
+                exit
+            end
+            error = $5
+            exist = ($1 or $3)
+            name = ($2 or $4)
+        ensure
+            ForeachScript.resume_scripts
+        end
+        if error
+            if error.start_with?("There")  # is nothing in there
+                echo "Container '#{target}' is empty."
+                return false  # Not a hard error.
+            elsif error.start_with?("That")  # is closed
+                echo "Container '#{target}' is closed."
+                exit
+            else
+                echo "Container '#{target}' was not found."
+                exit
+            end
+        end
+        unless exist
+            echo "Item ID for container '#{target}' could not be determined."
+            exit
+        end
+        unless GameObj.containers[exist]
+            echo "Inventory for container '#{target}' was not available."
+            exit
+        end
+        ingest_container(exist, name, GameObj.containers[exist] || [])
+        unless maybe_fetch_status_data(exist)
+            echo "The container '#{container_names[exist]}' does not appear to be in your inventory, which means that marked/registered information cannot be obtained from it."
+            exit
+        end
+    end
+
+    def ingest_all_pending
+        return if @pending_ingests.length == 0
+        begin
+            ForeachScript.stop_scripts
+            remaining = @pending_ingests.length
+            echo "Scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
+            hook = ForeachScript.anon_hook
+            @in_sorted_view = false
+            DownstreamHook.add(hook, proc {|xml| ItemMatcher.quiet_inv_scan_hook(xml)})
+            @pending_ingests.each do |id, ingest|
+                container = ingest[:item]
+                if remaining != @pending_ingests.length and remaining % ForeachScript::CONTAINER_UPDATE_INTERVAL == 0
+                    echo "Still scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
+                end
+                ingest[:locations].each{|location| fput "look #{location} ##{container.id}"}
+                remaining -= 1
+            end
+            waitfor '<prompt'
+
+            @pending_ingests.each do |id, ingest|
+                ingest_container(id, ingest[:item].full_name, GameObj.containers[id] || [])
+                unless maybe_fetch_status_data(id)
+                    echo "The container '#{container_names[id]}' does not appear to be in your inventory, which means that marked/registered information cannot be obtained from it."
+                    exit
+                end
+            end
+            @pending_ingests.clear
+        ensure
+            ForeachScript.resume_scripts
+        end
+    end
+
+    def finalize
+        ingest_all_pending
+
+        seen_names = @unique && Set.new || nil
+        skip = @after || 0
+        first = @first
+
+        final_contents = {}
+        final_names = {}
+        total_items = 0
+
+        @container_contents.each do |container, contents|
+            # Filter by status/uniqueness
+            if @status_filter > 0
+                contents.each{|item|
+                    unless maybe_fetch_status_data(item.id)
+                        echo "Failed to retrieve marked/registered info for '#{item.full_name}'.  Most likely this is because it is in a container not in your inventory."
+                        exit
+                    end
+                }
+                if @unique
+                    contents.select!{|item| ((@item_statuses[item.id] & @status_filter) == @status_filter) && seen_names.add?(item.full_name)}
+                else
+                    contents.select!{|item| (@item_statuses[item.id] & @status_filter) == @status_filter}
+                end
+            elsif @unique
+                contents.select!{|item| seen_names.add?(item.full_name)}
+            end
+
+            # Sort
+            contents.sort_by!{|x| x.full_name.gsub(/^(a|an|some|the)\s+/, '')} if @sorted
+
+            # Reverse
+            contents.reverse! if @reversed
+
+            # Handle skips
+            if skip >= contents.length
+                skip -= contents.length
+                next
+            elsif skip > 0
+                contents = contents.drop(skip)
+                skip = 0
+            end
+
+            if first
+                if first >= contents.length
+                    first -= contents.length
+                else
+                    contents = contents.first(first)
+                    first = 0
+                end
+            end
+
+            final_contents[container] = contents
+            final_names[container] = @container_names[container]
+            total_items += contents.length
+        end
+
+        @container_contents = final_contents
+        @container_names = final_names
+        @total_items = total_items
+        @command_cache.clear
+        @seen_ids.clear
+        return total_items > 0
+    end
+end
+
+
+module ForeachScript
+    VERSION = '0.10 (2019-06-10)'
+    VERSION_INT = 10_000
+    CONFIG_VERSION = 2
+    FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+(in|on|under|behind)\s+)|(in|on|under|behind)\s+)(.+)$/
+    # INV_PATTERN = /(?:(?:Peering into|In|On|Under|Behind) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|(There is nothing (?:in|on|under|behind) the|That is closed.|I could not find what you were referring to\.)/
+    HOOK = 'foreach_script_temp_hook'
+    HELP_URL = "https://github.com/dewiniaid/gs4-lich-scripts/blob/master/Foreach.md"
+
+    # INVFULL_PATTERN = /^( {2,})([^<]*)<a exist="(-?\d+)" noun="([^"]*)">([^<]*)<\/a>(?: ([^(]*)(?:$|(?= \()))?(?: (\(.*\)))?$/
+    # # Matches: 1 = leading space, 2 = prename, 3 = id, 4 = noun, 5 = name, 6 = postname, 7 = registered/marked attributes
+    # # You are carrying nothing at this time.  -- no inventory
     #
-    #     attr_accessor :unique, :marked, :registered, :first, :last
-    # end
-    #
-    # @previous = nil unless defined?(@previous)
-    @previous_names = nil unless defined?(@previous_names)
+    CONTAINER_UPDATE_INTERVAL = 10  # How often do we notify how many more containers are being scanned
+    ITEM_UPDATE_INTERVAL = 10  # How often do we notify how many more items are being processed?
+
+    COMMAND_PATTERNS = {
+        :move => /^(f(?:ast)?)?(?:move|mv)\s+(?:(.+)\s+)?to\s+(.*)$/i,
+    }
+
+    PREMIUM_LOCKER_CONTAINERS = {
+        'armor stand' => 'on',
+        'weapon rack' => 'on',
+        'magical item bin' => 'in',
+        'clothing wardrobe' => 'in',
+        'deep chest' => 'in'
+    }
+
+    @previous_matcher ||= nil
 
     def self.puts(msg)
         _respond msg
@@ -142,6 +627,11 @@ module ForeachScript
         [DownstreamHook, UpstreamHook].each{|provider|
             provider.list.find_all{|name| name.start_with?('Foreach::')}.each{|name| provider.remove(name)}
         }
+        if @stormfront && @quickbar_elements
+            # put "_qlink change #{@quickbar_id}"
+            _respond "<switchQuickBar id=\"#{@quickbar_id}\" />"
+            _respond "<closeDialog id=\"quick-foreach\" />"
+        end
     end
 
     def self.send_formatted(msg, mono=true)
@@ -156,8 +646,23 @@ module ForeachScript
         end
     end
 
+    def self.send_help_formatted(msg)
+        if @stormfront
+            msg = REXML::Text.new(msg, respect_whitespace: true).to_s
+            msg.gsub!(/\*\*(.*?)\*\*/, '<preset id="whisper">\1</preset>')
+            msg.gsub!(/`(.*?)`/, '<preset id="speech">\1</preset>')
+            msg.gsub!("#{name} help", "</preset><d cmd=\"#{name} help\">#{name} help</d><preset id=\"whisper\">")
+            puts "<output class=\"mono\" />\n#{msg}\n<output class=\"\" />"
+        else
+            msg.gsub!('**', '')
+            msg.gsub!('`', '')
+            respond msg
+        end
+    end
+
     def self.first_time_setup(force = false)
         return if GameSettings['version'] == CONFIG_VERSION and not force
+        return if EXPERIMENTAL_EXPIRES
 
         send = "#{$lich_char}send to #{@script.name}"
 
@@ -271,10 +776,10 @@ module ForeachScript
         Script.run('repository', 'list --author=LostRanger')
         puts ''
         puts [
-            "If ForEach is a trusted script, it will hide the commands it is sending to scan inventories and thus",
-            " reduce a tiny bit of screen spam.  This is entirely optional and doesn't otherwise affect the script at all.",
-            "  You can trust the script with\n",
-        ].join('')
+                 "If ForEach is a trusted script, it will hide the commands it is sending to scan inventories and thus",
+                 " reduce a tiny bit of screen spam.  This is entirely optional and doesn't otherwise affect the script at all.",
+                 "  You can trust the script with\n",
+             ].join('')
         respond "    #{$lich_char}trust foreach"
         puts "(LostRanger recommends that you review the code for scripts before trusting them!)"
         puts "\nTo view information and examples on how to use #{$lich_char}foreach, read the following:"
@@ -285,33 +790,157 @@ module ForeachScript
         respond "    #{$lich_char}#{@script.name} setup"
 
         if @script.vars[0].strip.length > 0 and not force
-           puts "\nTo run the command you were about to run when Foreach launched its first-time setup, type:"
-           respond "    #{$lich_char}#{@script.name} #{@script.vars[0]}"
+            puts "\nTo run the command you were about to run when Foreach launched its first-time setup, type:"
+            respond "    #{$lich_char}#{@script.name} #{@script.vars[0]}"
         end
         GameSettings['version'] = CONFIG_VERSION
         exit
     end
 
-    def self.show_help(full)
+    def self.show_changelog
+        prev = GameSettings[:current_version] || 0
 
-        # foreach first 5 box in inv?
-        # f
-        msg = []
+        changelog = {
+            8_000 => [
+                "Major version 0.8 changes:",
+                '',
+                "  * `;foreach in locker` should now work for non-premium lockers",
+                '',
+                "  * Fixed an issue which caused Foreach to stall briefly in some cases.",
+                '',
+                "  * No longer prompts to install XMLpatch on first launch.",
+                '',
+                "  * Add `sleep X` command, where X is a duration in seconds.",
+                '',
+                "  * `#{$lich_char}#{@script.name} loud` now toggles loud mode (mainly for debugging) and `#{$lich_char}#{@script.name} quiet` now disables it.  This logic was accidentally reversed earlier.",
+                '',
+                "  * Add `waitcastrt`, `waitrt?`, and `waitcastrt?` commands:",
+                "    `waitrt?` and `waitcastrt?` only wait for roundtime if it is currently present, as opposed to waiting for you to enter roundtime first.",
+                '',
+                "  * Added `UNIQUE`, `FIRST #`, and `AFTER #` modifiers.",
+            ],
+            9_000 => [
+                "Major version 0.9.x series changes:",
+                '',
+                "  * Improved documentation, including updating the online documentation.",
+                '',
+                "  * You can now further filter displayed items with `;foreach [un]registered ... in ...` and `;foreach [un]marked ... in ...`.",
+                "    These options will only work for items in your inventory or premium locker.",
+                '',
+                "  * `;foreach in locker` will now open your locker if it is not already, and will close your locker when it exits if it originally opened it.  `move to locker` will do similar.",
+                '',
+                "  * `;foreach in locker` in a premium locker will now try to use your locker manifest to avoid needing to scan multiple containers.  This adds a substantial startup speed boost.",
+                "    If this attempt fails, it is still improved in that it will no longer examine the curtain, your disk, or any other non-locker containers in the room.",
+                '',
+                "  * Added some more pretty formatting to ;foreach help  (Stormfront only)",
+                '',
+                "  * Make a second attempt at improving compatibility with the Profanity FE",
+                '',
+                "  * Add UNMARK as a shortcut for MARK item REMOVE",
+                '',
+                "  * Convenience shortcuts for in-game verbs should now trigger when abbreviated.",
+                "    This includes: DRop, PLACe, SELl, APpraise, and REGister",
+                '',
+                "  * If the first command is `get`, `take`, `register`, `mark` or `unmark`, an implicit \"get item\" or \"remove item\" will be added beforehand.",
+                "    This behavior already existed for `drop`, `place`, `sell `and `appraise`.",
+                '',
+                "  * If the only command specified is `appraise`, `register`, `mark` or `unmark`, items will be RETURNed afterwards in addition to the implicit get/remove at the start.",
+            ],
+            10_000 => [
+                "Version 0.10 changes:",
+                '',
+                "  * `;foreach sorted ... in ...` will iterate over items alphabetically within their respective containers.",
+                "    Articles a/an/some/the are ignored when sorting.  The order of which container is evaluated first is unchanged.",
+                '',
+                "  * `;foreach reversed ... in ...` will iterate over items backwards within their respective containers.",
+                "    This can be used to avoid changing container/room order, or in conjunction with 'sorted' to sort descending.",
+                '',
+                "  * `;foreach in X,Y,Z` can now be used to search in multiple targets at a time.",
+                "    This works with containers as well as the 'special' targets",
+                "    Try `;foreach in inv,disk;move to locker`",
+                '',
+                "  * Pattern matching is no longer case-sensitive.",
+                "    `;foreach q=elan*pack in sack` should match \"an Elanthian Guilds voucher pack\"",
+                '',
+                "  * Completely overhauled the item matching engine to make it easier to maintain going forward.",
+                '',
+                "  * `;foreach type=none in ...` will now match items that have no explicit type.",
+                '',
+                "  * You can now ;foreach ... under|behind ...  instead of just ;foreach ... in   and ;foreach ... on",
+                '',
+                "  * Legacy premium locker searching now looks ON armor stands and weapon racks rather than IN them.",
+                "    (This only triggers if LOCKER MANIFEST fails for some reason, and only on premium lockers.)",
+            ],
+        }
+
+        if prev != VERSION_INT
+            msg = []
+            msg << "<preset id='speech'>--------------------</preset>"
+            msg << "<preset id='speech'>Welcome to #{$lich_char}#{@script.name}</preset> <preset id='whisper'>#{VERSION}</preset>"
+            msg << ''
+            changelog.each do |version, notes|
+                if version > prev or version == VERSION_INT
+                    msg << "<preset id='whisper'>#{notes[0]}</preset>"
+                    msg += notes[1..-1]
+                    msg << ''
+                end
+            end
+            msg << '<output class="mono" />'
+            msg << "For a more detailed changelog: <d>#{$lich_char}repo info #{@script.name}</d>."
+            msg << "To enable automatic updates:   <d>#{$lich_char}repo set-updatable #{@script.name}</d>`."
+            msg << "For details on new features:   <d>#{$lich_char}#{@script.name} help</d>"
+            msg << "                   or visit:   #{HELP_URL}"
+            msg << '<output class="" />'
+            msg << ''
+            msg << "This message will only be displayed once unless a new version is downloaded."
+            msg << "<preset id='speech'>--------------------</preset>"
+            send msg
+            GameSettings[:current_version] = VERSION_INT
+            sleep 1.5
+        end
+    end
+
+    def self.send(what)
+        if @stormfront
+            return _respond(what)
+        end
+
+        unless what.is_a?(Array)
+            what = [what]
+        end
+
+        return _respond what.map{|line|
+            if line =~ /^\s*<\/?output[^>]*>$/
+                nil
+            else
+                line = line.gsub(/<preset.*?>(.*?)<\/preset>/, "\\1")
+                line.gsub!('<pushBold/>', monsterbold_start)
+                line.gsub!('<popBold/>', monsterbold_end)
+                line.gsub!(/<\/?d.*?>/, '')
+                line
+            end
+        }.keep_if{|x| x}
+    end
+
+    def self.show_help(full)
         name = "#{$lich_char}#{@script.name}"
+        msg = []
         msg << "**This is ForEach version #{VERSION}**"
         msg << "**Usage:**"
-        msg << "    #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in <TARGET>[; command; command; ...]"
-        msg << " or #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in <TARGET>[/ command/ command/ ...]"
-        msg << " or #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in <TARGET>[| command| command| ...]"
+        msg << "     #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in/on/under/behind <TARGETS>[; command; command; ...]"
+        msg << "  or #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in/on/under/behind <TARGETS>[/ command/ command/ ...]"
+        msg << "  or #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in/on/under/behind <TARGETS>[| command| command| ...]"
+        # msg << ''
+        # msg << "Type #{name} SET for settings"
         msg << ''
         if full
             msg << "**ATTRIBUTE** can be one of: `noun`, `name`, `fullname`, `quick`, or `type`.  If unspecified, it is type."
             msg << "    These can also be shortned to `n`, `m`, `f`, `q` or `t`."
             msg << "    `quick` is equivalent to `fullname` with automatic wildcards at the ends."
             msg << ''
-            msg << "**VALUE** is what the attribute's value must match.  Wildcards (with *) are supported."
+            msg << "**VALUE** is what the attribute's value must match.  Wildcards (with *) are supported.  Multiple VALUEs can be matched by separating them with commas."
             msg << ''
-            msg << "**TARGET** can be a name of a container or one of the following:"
+            msg << "**TARGETS** is a comma-separated list of one or more TARGETs, each of which can be a name of a container or one of the following:"
             msg << ''
             msg << "    `INV` or `INVENTORY`  - Contents of all containers in your inventory."
             msg << "    `WORN`              - All worn items in your inventory."
@@ -333,6 +962,8 @@ module ForeachScript
             msg << "    `AFTER n`        - will skip the first `n` matching items.  (You can also use `SKIP`)"
             msg << "    `[UN]MARKED`     - Only considers marked or unmarked items.  Only available for targets in your inventory or premium locker."
             msg << "    `[UN]REGISTERED` - Only considers registered or unregistered items.  Only available for targets in your inventory or your premium locker."
+            msg << "    `SORTED`         - Within each target, sort items alphabetically by full name (ignoring articles a/an/some/the)."
+            msg << "    `REVERSED`       - Reverse the order in which items are iterated, possibly after sorting."
             msg << ''
             msg << "If no commands are specified, #{name} will show a list of all matching items instead."
             msg << "This list will show item types, so '#{name} in backpack' can help you determine which item type to use."
@@ -349,8 +980,8 @@ module ForeachScript
             msg << "    `STASH [<item>]`                 - Attempts to move the item to your lootsack(s), trying them in order if they are full."
             msg << "    `PAUSE`                          - Pause the script.  #{name} will resume where it left off when unpaused."
             msg << "    `SLEEP <time>`                   - Pause for <time> seconds.  Decimals, e.g. '0.5', are allowed."
-            msg << "    `WAITRT`                         - Wait for roundtime to finish.  Hangs if not in roundtime."
-            msg << "    `WAITCASTRT`                     - Wait for cast roundtime to finish.  Hangs if not in roundtime."
+            msg << "    `WAITRT` or `WAITRT?`              - Wait for roundtime to finish.  'waitrt?' will not wait if you are not already in RT."
+            msg << "    `WAITCASTRT` or `WAITCASTRT?`      - Wait for cast roundtime to finish.  'waitcastrt?' will not wait if you are not already in cast RT."
             msg << "    `WAITFOR <phrase>`               - Waits to see the specified phrase.  Case insensitive."
             msg << "    `WAITRE <pattern>`               - Waits to see the specified regular expression."
             msg << "    `WAITMANA <#>` or `WAITMP <#>`     - Waits until you have at least this much mana."
@@ -380,23 +1011,36 @@ module ForeachScript
         else
             msg << "**This is the short version of the documentation.  For more, see #{name} help or visit:**"
         end
-        msg << "https://github.com/dewiniaid/gs4-lich-scripts/blob/master/Foreach.md"
+        msg << HELP_URL
         msg << ''
 
-        msg = msg.join("\n")
-
-        if @stormfront
-            msg = REXML::Text.new(msg, respect_whitespace: true).to_s
-            msg.gsub!(/\*\*(.*?)\*\*/, '<preset id="whisper">\1</preset>')
-            msg.gsub!(/`(.*?)`/, '<preset id="speech">\1</preset>')
-            msg.gsub!("#{name} help", "</preset><d cmd=\"#{name} help\">#{name} help</d><preset id=\"whisper\">")
-            puts "<output class=\"mono\" />\n#{msg}\n<output class=\"\" />"
-        else
-            msg.gsub!('**', '')
-            msg.gsub!('`', '')
-            respond msg
-        end
+        return send_help_formatted(msg.join("\n"))
     end
+    #
+    # def self.show_settings
+    #     msg = []
+    #     msg << "**This is ForEach version #{VERSION}**"
+    #     msg << "**Usage:**"
+    #     msg << "     #{name} SET [name=value [name=value ...]]"
+    #     msg << ''
+    #     msg << "**Settings (and current values):**"
+    #
+    #     [
+    #         [
+    #             "STATUS", GameSettings[:show_status] && 'ON ' || 'OFF',
+    #             "Show status in shortcut bar (Stormfront only)"
+    #         ],
+    #         [
+    #             "SAFETY", GameSettings[:show_status] && 'ON ' || 'OFF',
+    #             "Show status in shortcut bar (Stormfront only)"
+    #         ]
+    #
+    #     ].each do |k, v, d|
+    #         msg << "    #{k.ljust(10)} = `#{v.ljust(10)}` : #{d}"
+    #     end
+    #
+    #     return send_help_formatted(msg.join("\n"))
+    # end
 
     def self.quiet_command(command, start_pattern, end_pattern = /<prompt/, include_end = true, timeout=5)
         result = []
@@ -442,20 +1086,6 @@ module ForeachScript
         return result
     end
 
-    def self.quiet_inv_scan_hook(xml)
-        if @in_sorted_view
-            @in_sorted_view = false if xml =~ /Total items: \d+$/
-            return nil
-        end
-
-        return nil if xml =~ /^<prompt|^s*$/
-        return xml unless xml =~ INV_PATTERN
-        @in_sorted_view = true if $3
-        return nil
-        #
-        # (xml =~ INV_PATTERN or xml =~ /^<prompt/ or xml =~ /^\s*$/) ? nil : xml
-    end
-
     def self.stop_scripts
         ['sorter'].each{|s|
             if Script.running?(s)
@@ -467,7 +1097,7 @@ module ForeachScript
 
     def self.resume_scripts
         @stopped_scripts.each{|s| Script.start(s) }
-        @stopped_scripts = []
+        @stopped_scripts.clear
     end
 
     def self.holding?(id)
@@ -506,49 +1136,48 @@ module ForeachScript
         return proc {|item| true} unless value
 
         if attr == 'quick' or attr == 'q' then
-            pattern = /(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})/
+            pattern = /(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})/i
         else
-            pattern = /^(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})$/
+            pattern = /^(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})$/i
         end
 
         case attr
-            when 'type', 't'
-                unless GameObj.type_data.find{|k, v| k.split(',').find{|t| t =~ pattern}}
-                    echo "No item types match the pattern '#{value}'.  Did you perhaps mean '#{$lich_char}#{@script.name} #{value =~ /\s/ ? 'name' : 'noun'}=#{value} in #{target};...'?"
-                    echo "Type '#{$lich_char}#{@script.name}' by itself for more options and a list of item types."
-                    exit
-                end
-                return proc {|item| item.type.split(',').find{|t| t =~ pattern}}
-            when 'name', 'm'
-                return proc {|item| item.name =~ pattern}
-            when 'fullname', 'f', 'quick', 'q'
-                return proc {|item| item.full_name =~ pattern}
-            when 'noun', 'n'
-                return proc {|item| item.noun =~ pattern}
-            else
-                return nil
+        when 'type', 't'
+            if value =~ /^none$/i
+                return proc {|item| item.type == '' or item.type.nil?}
+            end
+            unless GameObj.type_data.find{|k, v| k.split(',').find{|t| t =~ pattern}}
+                echo "No item types match the pattern '#{value}'.  Did you perhaps mean '#{$lich_char}#{@script.name} #{value =~ /\s/ ? 'name' : 'noun'}=#{value} in #{target};...'?"
+                echo "Type '#{$lich_char}#{@script.name}' by itself for more options and a list of item types."
+                exit
+            end
+            return proc {|item| item.type.split(',').find{|t| t =~ pattern}}
+        when 'name', 'm'
+            return proc {|item| item.name =~ pattern}
+        when 'fullname', 'f', 'quick', 'q'
+            return proc {|item| item.full_name =~ pattern}
+        when 'noun', 'n'
+            return proc {|item| item.noun =~ pattern}
+        else
+            return nil
         end
     end
 
     def self.wait_block(message, target, valueproc)
         if valueproc.call < target
             echo message
-            wait_until { valueproc.call >= target }
+            self.status_until(message){ wait_until { valueproc.call >= target } }
         end
     end
 
-    def self.get_locker_containers
-        containers = {}
-        GameObj.loot.each do |item|
-            if PREMIUM_LOCKER_CONTAINERS.include?(item.full_name)
-                containers[item.noun] = item
-            end
-        end
-        return containers if containers.length == PREMIUM_LOCKER_CONTAINERS.length
+    def self.status_until(status, cond=true, &block)
+        qb_refresh(status: status) if cond
+        block.call
+        qb_refresh(status: "Running") if cond
     end
 
     def self.is_premium_locker?
-        looking_for = PREMIUM_LOCKER_CONTAINERS.dup
+        looking_for = Set.new(PREMIUM_LOCKER_CONTAINERS.keys)
         GameObj.loot.each{|item|
             if looking_for.delete?(item.full_name)
                 if looking_for.empty?
@@ -557,117 +1186,6 @@ module ForeachScript
             end
         }
         return false
-    end
-
-    def self.get_locker_from_manifest(extended_data)
-        locker_containers = self.get_locker_containers
-        unless locker_containers
-            return nil
-        end
-
-        unless Room.current and Room.current.id
-            echo "Current room is not mapped.  Unable to determine what town this locker is in."
-            return nil
-        end
-
-        loc = Room.current.location
-        unless loc
-            echo "Location of this room is not known.  Unable to determine what town this locker is in."
-            return nil
-        end
-
-        unless loc =~ LOCKER_PATTERNS[:town_locales]
-            echo "Location of this room is not familiar.  Unable to determine what town this locker is in."
-            return nil
-        end
-
-        manifest_command = "locker manifest #{$1}"
-
-        data = quiet_command(manifest_command, LOCKER_PATTERNS[:start])
-
-        to_filter = {}
-        container_names = {}
-        current_container = nil
-        finished = false
-
-        data.each{|xml|
-            if xml =~ LOCKER_PATTERNS[:start]
-                unless $1   # Remote locker, not local locker
-                    echo "Location of this room appears to be incorrect, or your locker is not open."
-                    return nil
-                end
-            elsif xml =~ LOCKER_PATTERNS[:end]
-                finished = true
-            elsif xml =~ LOCKER_PATTERNS[:container]
-                unless (t = locker_containers[$1])
-                    echo "Unrecognized container noun: #{$1}"
-                    return nil
-                end
-                current_container = t.id
-                container_names[current_container] = t.full_name
-                to_filter[current_container] = []
-            elsif xml =~ LOCKER_PATTERNS[:item]
-                unless current_container
-                    echo "I found an item in a container before I found my first container.  This shouldn't happen."
-                    echo "Please save a copy of #{manifest_command.upcase} and contact LostRanger"
-                    exit
-                end
-
-                item = GameObj.new($2.dup, $3.dup, $4.dup, $1.dup, $5.dup)
-                to_filter[current_container] << item
-                extended_data[item.id] = extended_data_value($6) if extended_data
-            end
-        }
-
-        unless finished
-            echo "Locker manifest read was incomplete"
-            return nil
-        end
-
-        return {
-            :to_filter => to_filter,
-            :container_names => container_names,
-        }
-    end
-
-    def self.extended_data_from_inv(extended_data, command="inv full")
-        waitrt?
-        return unless extended_data
-        data = self.quiet_command(
-            command,
-            /^(?:You are carrying nothing at this time|You are currently (?:wearing and )?carrying)/,
-            /(?:<prompt)|(?:.*items? displayed\.\)$)/,
-            # /(?:<prompt)|(?:items displayed.\)\b)/,
-            true,
-            5
-        )
-        unless data
-            echo "Inventory request timed out."
-            exit
-        end
-        data.each{|xml|
-            next unless xml =~ INVFULL_PATTERN
-            item = GameObj.new($3.dup, $4.dup, $5.dup, $2.dup, $6.dup)
-            extended_data[item.id] = extended_data_value($7)
-        }
-
-        return extended_data
-    end
-
-    def self.extended_data_value(text)
-        value = 0
-        return UNREGISTERED | UNMARKED unless text
-        if text =~ /registered/i
-            value |= REGISTERED
-        else
-            value |= UNREGISTERED
-        end
-
-        if text =~ /marked/i
-            value |= MARKED
-        else
-            value |= UNMARKED
-        end
     end
 
     def self.open_locker
@@ -698,10 +1216,16 @@ module ForeachScript
         @script.want_downstream = false
         @script.want_downstream_xml = true
 
+        @quickbar_id = 'quick'
+        @quickbar_status = nil
+        @quickbar_elements = nil
+        @quickbar_previous = nil
+
         options = {}
         extended_data = nil
 
         self.first_time_setup(@script.vars[0] =~ /^\s*setup\s*$/i ? true : false)
+        self.show_changelog
 
         @stopped_scripts = []
         before_dying {
@@ -714,57 +1238,80 @@ module ForeachScript
         separator = $2
         commands = $3
 
+        matcher = ItemMatcher.new
+
         # Read first/skip/unique bits.
-        while filter =~ /^(?:(unique|(?:un)?(?:marked|registered))|(?:(?:(first|after|skip)\s+)?(\d+)))\s+(.*)/i
+        while filter =~ /^(?:(unique|reverse|reversed|sort|sorted|(?:un)?(?:mark|marked|register|registered))|(?:(?:(first|after|skip)\s+)?(\d+)))\s+(.*)/i
             filter = $4
             if $1
-                if $1 == 'unique'
-                    if options[:unique]
+                case $1
+                when 'unique'
+                    if matcher.unique
                         echo "'unique' specified more than once."
                         exit
                     end
-                    options[:unique] = true
+                    matcher.unique = true
+                when 'reverse', 'reversed'
+                    if matcher.reversed
+                        echo "'reversed' specified more than once."
+                        exit
+                    end
+                    matcher.reversed = true
+                when 'sort', 'sorted'
+                    if matcher.sorted
+                        echo "'sorted' specified more than once."
+                        exit
+                    end
+                    matcher.sorted = true
                 else
                     opt = $1
                     value = !opt.start_with?("un")
                     unless value
                         opt = opt[2, opt.length]
                     end
-                    sym = opt.to_sym
-                    if options[sym].nil?
-                        options[sym] = value
-                    elsif options[sym] == value
-                        echo "'#{$1}' specified more than once."
-                        exit
+
+                    case opt
+                    when 'mark', 'marked'
+                        if matcher.marked.nil?
+                            matcher.marked = value
+                        elsif matcher.marked == value
+                            echo "'#{$1}' specified more than once."
+                            exit
+                        else
+                            echo "Cannot specify both '#{opt}' and 'un#{opt}."
+                            exit
+                        end
+                    when 'register', 'registered'
+                        if matcher.registered.nil?
+                            matcher.registered = value
+                        elsif matcher.registered == value
+                            echo "'#{$1}' specified more than once."
+                            exit
+                        else
+                            echo "Cannot specify both '#{opt}' and 'un#{opt}."
+                            exit
+                        end
                     else
-                        echo "Cannot specify both '#{opt}' and 'un#{opt}."
+                        echo "Unknown boolean option '#{opt}'"
                         exit
                     end
                 end
             elsif $3
                 if not $2 or $2.downcase == 'first'
-                    if options[:first]
+                    if matcher.first
                         echo "'first' specified more than once."
                         exit
                     end
-                    options[:first] = $3.to_i
+                    matcher.first = $3.to_i
                 else
-                    if options[:skip]
+                    if matcher.after
                         echo "'skip' specified more than once."
                         exit
                     end
-                    options[:skip] = $3.to_i
+                    matcher.after = $3.to_i
                 end
             end
         end
-
-        options[:skip] ||= 0
-        options[:extdata_filter] = 0
-        options[:extdata_filter] |= UNMARKED if options[:marked] == false
-        options[:extdata_filter] |= MARKED if options[:marked] == true
-        options[:extdata_filter] |= UNREGISTERED if options[:registered] == false
-        options[:extdata_filter] |= REGISTERED if options[:registered] == true
-        extended_data = {} if options[:extdata_filter] != 0
 
         # Determine filter and container bits.
         unless filter =~ FILTER_PATTERN
@@ -775,7 +1322,7 @@ module ForeachScript
         filter_attr = ($1.downcase or 'type')
         filter_value = $2
         position = ($3 or $4)
-        target = $5
+        targets = $5
         explicit_all = false  # Safety bypass.
 
         if filter_attr == 'type' and filter_value =~ /all|any|everything/i
@@ -784,11 +1331,13 @@ module ForeachScript
             filter_value = nil
         end
 
-        filter_proc = self.build_filter(filter_value, filter_attr, target)
+        filter_proc = self.build_filter(filter_value, filter_attr, targets)
         unless filter_proc
             echo "Unknown attribute '#{filter_attr}'"
             exit
         end
+
+        matcher.item_filter = filter_proc
 
         # Process commands
         lootsacks = nil
@@ -845,11 +1394,7 @@ module ForeachScript
                         command = '_drag item drop'
                     elsif command =~ /^(?:giveitem)|(?:place|sell|(appraise|register|mark|unmark))\s+item$/i
                         implicit_return = $1 && (count == 1)
-                        if target =~ /^worn$/i
-                            new_commands << 'remove item'
-                        else
-                            new_commands << 'get item'
-                        end
+                        new_commands << '_remget item'  # Hackery
                         new_commands << command
                         new_commands << "return" if implicit_return
                         next
@@ -876,311 +1421,142 @@ module ForeachScript
         end
 
         # Find possible item IDs
-        to_scan  = []
-        to_filter = {}
-        container_names = {nil => 'On the ground'}
         silence_me if $SAFE == 0
 
-        if target =~ /^(?:locker)$/i
-            open_locker
-        end
+        seen_locker = seen_inv = false
 
-        if target =~ /^inv(?:entory)?$/i  # Entire inventory
-            # Sanity check
-            if commands.length > 0 and filter_value.nil?
-                echo 'WARNING: THIS COMMAND WILL ACT ON EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
-                if explicit_all
-                    echo "'#{$lich_char}kill #{@script.name}' to abort!"
-                    sleep 0.5  # A moment before it all scrolls off
-                else
-                    echo "If you REALLY want to do this, you must explicitly say so by using '#{$lich_char}#{@script.name} ALL in #{target}';..."
-                    exit
-                end
-            end
-
-            # Parse INV FULL output, sort of.
-            data = self.quiet_command(
-                'inv full',
-                /^(?:You are carrying nothing at this time|You are currently wearing and carrying)/,
-                /(?:<prompt)|(?:.*items? displayed\.\)$)/,
-                # /(?:<prompt)|(?:items displayed.\)\b)/,
-                true,
-                5
-            )
-            unless data
-                echo "Inventory request timed out."
-                exit
-            end
-            last_container = nil
-            last_container_name = nil
-            data.each{|xml|
-                next unless xml =~ INVFULL_PATTERN
-                # echo $~.inspect
-                case $1.length
-                    when 2
-                        last_container = $3
-                        last_container_name = $5
-                    when 6
-                        unless last_container
-                            echo "I found an item in a container before I found my first container.  This shouldn't happen."
-                            echo "Please save a copy of INV FULL and contact LostRanger"
-                            exit
-                        end
-                        item = GameObj.new($3.dup, $4.dup, $5.dup, $2.dup, $6.dup)
-                        unless to_filter[last_container]
-                            to_filter[last_container] = []
-                            container_names[last_container] = last_container_name
-                        end
-                        to_filter[last_container] << item
-
-                        # Read extdata if we need it
-                        extended_data[item.id] = self.extended_data_value($7) if extended_data
-                    else
-                        next
-                end
-            }
-        elsif target =~ /^(?:prev(?:ious)?|last)$/i  # Previous run
-            unless @previous
-                echo "No previous run data is available."
-                exit
-            end
-            if extended_data
-                echo "Target 'previous' does not support filtering by mark or registration status."
-                exit
-            end
-            to_filter = @previous
-            container_names = @previous_names
-        elsif target =~ /^(?:loot)$/i  # Loot in room
-            if extended_data
-                echo "Target 'loot' does not support filtering by mark or registration status."
-                exit
-            end
-            to_scan = GameObj.loot.map{|item| item.id}
-            GameObj.loot.each{|item| container_names[item.id] = item.full_name}
-        elsif target =~ /^(?:locker)$/i and self.is_premium_locker?
-            manifest = get_locker_from_manifest(extended_data)
-            if manifest
-                to_filter = manifest[:to_filter]
-                container_names = manifest[:container_names]
-            else
-                if extended_data
-                    echo "I had to fall back to legacy locker scanning, which means I can't filter by mark or registration status."
-                    echo "Most likely, this can be fixed by updating the MapDB for this locker.  Please contact LostRanger with the room number (if known), description, and location for details."
-                    exit
-                end
-
-                # Fall back to legacy locker scan.
-                locker_containers = GameObj.loot.keep_if{|x| PREMIUM_LOCKER_CONTAINERS.include?(x.full_name)}
-                to_scan = locker_containers.map{|item| item.id}
-                locker_containers.each{|item| container_names[item.id] = item.full_name}
-            end
-        elsif target =~ /^(?:floor|ground|room)$/i  # Items on ground
-            if extended_data
-                echo "Target '#{target}' does not support filtering by mark or registration status."
-                exit
-            end
-            to_filter[nil] = GameObj.loot
-        elsif target =~ /^worn$/i  # Worn items
-            to_filter[nil] = GameObj.inv
-            container_names[nil] = 'On your person'
-        else   # A specific container
-            if target =~ /^locker$/i
-                if extended_data
-                    echo "Target 'locker' only supports filtering by mark or registration status when used on a premium locker."
-                    exit
-                end
+        targets = targets.split(/\s*,\s*/)
+        targets.uniq!
+        targets.each do |target|
+            target.strip!
+            next if target == ''
+            if target =~ /^(?:locker)$/i
                 open_locker
             end
-            stop_scripts
-            xml = dothistimeout("look #{position} #{target}", 15, INV_PATTERN)
-            unless xml =~ INV_PATTERN
-                echo "Timed out waiting for inventory command."
-                exit
-            end
-            error = $5
-            if error
-                if error.start_with?("There")  # is nothing in there
-                    echo "Target container is empty."
-                elsif error.start_with?("That")  # is nothing in there
-                    echo "Target container is closed."
-                else
-                    echo "Target container was not found."
-                end
-                exit
-            end
-            exist = ($1 or $3)
-            name = ($2 or $4)
-            unless exist
-                echo "Error locating item or item inventory."
-                exit
-            end
-            unless GameObj.containers[exist]
-                echo "Error loading item inventory."
-                exit
-            end
 
-            to_filter[exist] = GameObj.containers[exist]
-            container_names[exist] = name
-
-            if extended_data
-                if GameObj.right_hand.id == exist or GameObj.left_hand.id == exist
-                    self.extended_data_from_inv(extended_data, 'inv hands full')
-                else
-                    self.extended_data_from_inv(extended_data)
-                    self.extended_data_from_inv(extended_data, 'inv hands full') unless extended_data[exist]
+            if target =~ /^inv(?:entory)?$/i  # Entire inventory
+                next if seen_inv
+                seen_inv = true
+                # Sanity check
+                if commands.length > 0 and filter_value.nil?
+                    echo 'WARNING: THIS COMMAND WILL ACT ON EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
+                    if explicit_all
+                        echo "'#{$lich_char}kill #{@script.name}' to abort!"
+                        sleep 1  # A moment before it all scrolls off
+                        # echo "'#{$lich_char}unpause #{@script.name}' to continue, or '#{$lich_char}kill #{@script.name}' to abort"
+                        # pause_script
+                    else
+                        echo "If you REALLY want to do this, you must explicitly say so by using '#{$lich_char}#{@script.name} ALL in #{target}';..."
+                        exit
+                    end
                 end
-                unless extended_data[exist]
-                    echo "The container '#{container_names[exist]}' does not appear to be in your inventory, which means that marked/registered information cannot be obtained from it."
+
+                matcher.ingest_inventory
+            elsif target =~ /^(?:prev(?:ious)?|last)$/i  # Previous run
+                unless @previous_matcher
+                    echo "No previous run data is available."
                     exit
                 end
-            end
-        end
-
-        if to_scan.length > 0
-            stop_scripts
-            remaining = to_scan.length
-            echo "Scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
-            hook = self.anon_hook
-            @in_sorted_view = false
-            DownstreamHook.add(hook, proc {|xml| self.quiet_inv_scan_hook(xml)})
-            to_scan.each{|exist|
-                if remaining != to_scan.length and remaining % CONTAINER_UPDATE_INTERVAL == 0
-                    echo "Still scanning #{remaining} inventor#{remaining==1 ? 'y' : 'ies'}, please wait..."  # if $SAFE == 0
+                if matcher.status_filter != 0
+                    echo "Target 'previous' does not support filtering by mark or registration status."
+                    exit
                 end
-                remaining -= 1
-                fput "look #{position} ##{exist}" }
-            waitfor '<prompt'
-            DownstreamHook.remove(hook)
-
-            scanned_inv = scanned_hands = false
-            to_scan.each{|exist|
-                to_filter[exist] = GameObj.containers[exist]
-                if extended_data
-                    if GameObj.right_hand.id == exist or GameObj.left_hand.id == exist
-                        self.extended_data_from_inv(extended_data, 'inv hands full') unless scanned_hands
-                        scanned_hands = true
+                matcher.ingest_previous(@previous_matcher)
+            elsif target =~ /^(?:loot)$/i  # Loot in room
+                if matcher.status_filter != 0
+                    echo "Target 'loot' does not support filtering by mark or registration status."
+                    exit
+                end
+                matcher.ingest_loot
+            elsif target =~ /^(?:locker)$/i and self.is_premium_locker?
+                next if seen_locker
+                seen_locker = true
+                unless matcher.ingest_locker_from_manifest
+                    if matcher.status_filter != 0
+                        echo "I had to fall back to legacy locker scanning, which means I can't filter by mark or registration status."
+                        echo "Most likely, this can be fixed by updating the MapDB for this locker.  Please contact LostRanger with the room number (if known), description, and location for details."
+                        exit
                     else
-                        self.extended_data_from_inv(extended_data) unless scanned_inv
-                        scanned_inv = true
-                        unless extended_data[exist] or scanned_hands
-                            self.extended_data_from_inv(extended_data, 'inv hands full')
-                            scanned_hands = true
-                        end
-                    end
-                    unless extended_data[exist]
-                        echo "The container '#{container_names[exist]}' does not appear to be in your inventory, which means that marked/registered information cannot be obtained from it."
-                        exit
+                        echo "Locker manifest scanning failed, falling back to legacy scan."
+                        # Fall back to legacy locker scan.
+                        matcher.ingest_legacy_locker
                     end
                 end
-            }
-
-            self.extended_data_from_inv(extended_data) if extended_data
+            elsif target =~ /^(?:floor|ground|room)$/i  # Items on ground
+                if matcher.status_filter != 0
+                    echo "Target '#{target}' does not support filtering by mark or registration status."
+                    exit
+                end
+                matcher.ingest_ground
+            elsif target =~ /^worn$/i  # Worn items
+                matcher.ingest_worn
+            else   # A specific container
+                if target =~ /^locker$/i
+                    if matcher.status_filter != 0
+                        echo "Target 'locker' only supports filtering by mark or registration status when used on a premium locker."
+                        exit
+                    end
+                    open_locker
+                end
+                matcher.ingest_from_name(target, position)
+            end
         end
 
-        resume_scripts
-        silence_me if $SAFE == 0
-
-        total_items = 0
-        filtered = {}
-
-        first = options[:first]
-        skip = options[:skip]
-        extdata_filter = options[:extdata_filter]
-        unique = options[:unique]
-        unique_count = {}
-
-        # echo options.inspect
-        # echo extended_data.inspect
-        #
-        to_filter.each{|container, items|
-            unless (items and items.length > 0) and (first.nil? or first > 0)
-                container_names.delete(container)
-                next
-            end
-
-            # Filter out items by registration status
-            if extended_data
-                items.keep_if{|item|
-                    unless extended_data[item.id]
-                        echo "Failed to retrieve marked/registered info for '#{item.full_name}'.  Most likely this is because it is in a container not in your inventory."
-                        exit
-                    end
-                    (extended_data[item.id] & extdata_filter) == extdata_filter
-                }
-            end
-
-            if unique
-                items.keep_if{|item| filter_proc.call(item) and unique_count[item.full_name] ||= 0 and (unique_count[item.full_name]+=1)==1}
-            else
-                items.keep_if{|item| filter_proc.call(item)}
-            end
-
-            unless items.length > 0
-                container_names.delete(container)
-                next
-            end
-
-            if skip >= items.length
-                skip -= items.length
-                container_names.delete(container)
-                next
-            elsif skip > 0
-                items = items.drop(skip)
-                skip = 0
-            end
-
-            unless first.nil?
-                if first >= items.length
-                    first -= items.length
-                else
-                    items = items.first(first)
-                    first = 0
-                end
-            end
-
-            total_items += items.length
-            filtered[container] = items
-        }
-
-        if total_items == 0
+        unless matcher.finalize
             echo 'No matching items found!'
             exit
         end
+        total_items = matcher.total_items
 
-        @previous = filtered
-        @previous_names = container_names
+        @previous_matcher = matcher
 
         before_next = nil  # Possibly skippable things to do before the next command.
-
-        move_container_cache = {}
-
+        move_container_cache = {}  # Ids of discovered containers
         processed_items = 0
-        filtered.each{|container, items|
+        matcher.container_contents.each{|container, items|
+            container_name = matcher.container_names[container]
             # next unless items.length > 0
             # items = items.find_all{|item| filter.call(item)}
             # next unless items.length > 0
             if commands.length > 0
                 items.each{|item|
                     ref = "##{item.id}"
+                    percent = (100.0 * processed_items / total_items).to_i
                     if processed_items % ITEM_UPDATE_INTERVAL == 0
-                        percent = (100.0 * processed_items / total_items).to_i
                         echo "Item #{processed_items + 1} of #{total_items}.  (#{percent}% complete)"
                     end
+                    qb_refresh(
+                        status: "Running",
+                        item: item,
+                        items_processed: processed_items,
+                        items_total: total_items,
+                        percent: percent
+                    )
+
                     commands.each_with_index{|original, ix|
                         command = (
-                            original
+                        original
                             .gsub(/\bitem\b/i, ref)
                             .gsub(/\bnoun\b/i, item.noun)
                             .gsub(/\bname\b/i, item.name)
                             .gsub(/\bcontainer\b/i, ("##{container}"))
                         )
+
+                        if command =~ /^_remget (.*)/
+                            if container == '_worn'
+                                command = "remove #{$1}"
+                            else
+                                command = "get #{$1}"
+                            end
+                        end
+
                         if command.start_with?($lich_char)
                             before_next.call if before_next
                             before_next = proc { waitrt? }
                             scriptname, args = command.split(/\s+/, 2)
                             scriptname = scriptname[1..-1]
                             echo "Running #{$lich_char}#{scriptname} #{args}"
-                            Script.run(scriptname, args)
+                            status_until("Waiting on #{$lich_char}#{scriptname}"){ Script.run(scriptname, args) }
                         elsif command =~ COMMAND_PATTERNS[:move]
                             before_next.call if before_next
                             before_next = nil
@@ -1224,77 +1600,27 @@ module ForeachScript
                             unless where[0] == '#' or move_container_cache.include?(where)
                                 nil until get =~ /^(?:(?:<.*>)?You (?:put|absent-mindedly drop) (?:[^<]*)<a exist="(-?\d+).*?<\/a>.*<a exist="(-?\d+).*?<\/a)|<prompt/
                                 move_container_cache[where] = ($2 and GameObj.inv.find{|x| x.id == $2}) ? "##{$2}" : false
-                                # if $2
-                                #     # echo "Learned that '#{where}' is ##{$2}"
-                                #     if GameObj.inv.find{|x| x.id == $2}
-                                #         # echo "Learned that '##{$2}' is an inventory container, and probably doesn't support ON/UNDER/BEHIND"
-                                #         move_container_cache[where] = "##{$2}"
-                                #     else
-                                #         # echo "Learned that '##{$2}' is NOT an inventory container, and might support ON/UNDER/BEHIND"
-                                #         move_container_cache[where] = false
-                                #     end
-                                # else
-                                #     # echo "Learned that '#{where}' is probably a scripted container of some sort."
-                                #     move_container_cache[where] = false
-                                # end
-                                # if $2
-                                #     # echo "Learned that '#{where}' is ##{$2}"
-                                #     if GameObj.inv.find{|x| x.id == $2}
-                                #         # echo "Learned that '##{$2}' is an inventory container, and probably doesn't support ON/UNDER/BEHIND"
-                                #         move_container_cache[where] = "##{$2}"
-                                #     else
-                                #         # echo "Learned that '##{$2}' is NOT an inventory container, and might support ON/UNDER/BEHIND"
-                                #         move_container_cache[where] = false
-                                #     end
-                                # else
-                                #     # echo "Learned that '#{where}' is probably a scripted container of some sort."
-                                #     move_container_cache[where] = false
-                                # end
                             end
-
-                            #
-                            #
-                            #
-                            #
-                            #     fput "get #{what}" unless what == ref and self.holding?(item.id)
-                            #     waitfor '<right>', '<left>'
-                            # end
-                            # if where =~ /^(?:ground|floor)$/i
-                            #     fput "place #{what}"
-                            # else
-                            #     fput "put #{what} in #{where}"
-                            # end
-                            # waitfor '<right>', '<left>'
-                        # elsif command =~ /^f(?:ast)?(?:move|mv)\s+(?:(.+)\s+)?to\s+(.*)$/i
-                        #     before_next.call if before_next
-                        #     before_next = nil
-                        #     what = ($1 or ref)
-                        #     where = $2
-                        #     holding = (what == ref and self.holding?(item.id))
-                        #     put "get #{what}" unless holding
-                        #     put "put #{what} in #{where}"
-                        #     waitfor '<right>', '<left>' unless holding
-                        #     waitfor '<right>', '<left>'
                         elsif command =~ /^wait(?:mana|mp) (-?\d+)$/
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} mana...", n, proc { XMLData.mana })
+                            self.wait_block("Waiting for #{n} mana", n, proc { XMLData.mana })
                         elsif command =~ /^wait(?:health|hp) (-?\d+)$/
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} HP...", n, proc { XMLData.health })
+                            self.wait_block("Waiting for #{n} HP", n, proc { XMLData.health })
                         elsif command =~ /^wait(?:spirit|sp) (-?\d+)$/
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} spirit...", n, proc { XMLData.spirit })
+                            self.wait_block("Waiting for #{n} spirit", n, proc { XMLData.spirit })
                         elsif command =~ /^wait(?:stamina|st) (-?\d+)$/
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} stamina...", n, proc { XMLData.stamina })
+                            self.wait_block("Waiting for #{n} stamina", n, proc { XMLData.stamina })
                         elsif command =~ /^stash (.*$)/i
                             before_next.call if before_next
                             before_next = nil
@@ -1317,7 +1643,6 @@ module ForeachScript
                                     break
                                 end
                                 lootsacks << lootsacks.shift
-                                # echo lootsacks.map{|x| x.name}.join('; ')
                             }
                             next if success
                             echo "All lootsacks are full, pausing script."
@@ -1329,23 +1654,24 @@ module ForeachScript
                             echo $1
                         elsif command =~ /^waitrt$/i
                             before_next = nil
-                            waitrt
+                            status_until("Waiting for RT"){waitrt}
                         elsif command =~ /^waitrt\?$/i
                             before_next = nil
-                            waitrt?
+                            status_until("Waiting for RT", checkrt > 0){waitrt?}
                         elsif command =~ /^waitcastrt$/i
                             before_next = nil
-                            waitcastrt
+                            status_until("Waiting for Cast RT"){waitcastrt}
                         elsif command =~ /^waitcastrt\?$/i
                             before_next = nil
-                            waitcastrt?
+                            status_until("Waiting for Cast RT", checkcastrt){waitcastrt?}
                         elsif command =~ /^waitfor (.*)$/i
                             script.want_downstream = true
                             script.want_downstream_xml = false
+                            status_until("Waiting"){waitfor $1}
                             waitfor $1
-                            before_next = proc { waitrt? }
                             script.want_downstream_xml = true
                             script.want_downstream = false
+                            before_next = proc { status_until("Waiting for RT", checkrt > 0){waitrt?} }
                         elsif command =~ /^waitre (.*)$/i
                             text = $1
                             flags = nil
@@ -1354,8 +1680,8 @@ module ForeachScript
                                 flags = $2 unless $2 == ''
                             end
                             pattern = Regexp::new(text, flags)
-                            nil until get =~ pattern
-                            before_next = proc { waitrt? }
+                            status_until("Waiting"){ nil until get =~ pattern }
+                            before_next = proc { status_until("Waiting for RT", checkrt > 0){waitrt?} }
                         elsif command =~ /^pause$/i
                             percent = (100.0 * processed_items / total_items).to_i
                             msg = []
@@ -1363,7 +1689,7 @@ module ForeachScript
                             msg << "[#{@script.name}: Pausing at #{self.item_detail(item)},  (#{processed_items + 1} of #{total_items}, #{percent}% complete)."
                             msg << '<output class="" />' if $stormfront
                             puts msg.join("\n")
-                            pause_script
+                            status_until("Paused"){ pause_script }
                             before_next = proc { waitrt? }
                         elsif command =~ /^giveitem(?:\s+(?:to\s+)?(.+))?$/i
                             before_next.call if before_next
@@ -1375,39 +1701,38 @@ module ForeachScript
                             fput "give ##{item.id} to #{$1}"
                             script.want_downstream = true
                             script.want_downstream_xml = false
-                            waitfor /^#{$1} has accepted your offer/
+                            status_until("Waiting for accept"){ waitfor /^#{$1} has accepted your offer/ }
                             script.want_downstream_xml = true
                             script.want_downstream = false
                         elsif command =~ /^return(?:\s+item)?$/i
                             before_next.call if before_next
                             before_next = nil
-                            if container
-                                fput "put #{ref} in ##{container}"
-                            elsif target =~ /^worn$/i
+                            if container == '_worn'
                                 fput "wear #{ref}"
-                            else
+                            elsif container == '_ground'
                                 fput "place #{ref}"
+                            else
+                                fput "put #{ref} in ##{container}"
                             end
                             #     waitfor '<right>', '<left>'  # Wait for a hand change.
                             # end
                         elsif command =~ /^sleep (\d*\.?\d+)$/i
-                            sleep $1.to_f
+                            status_until("Sleeping") { sleep $1.to_f }
                         elsif command =~ /^unmark\s+(.*)/i
                             before_next.call if before_next
                             before_next = nil
                             fput "mark #{$1} remove"
                         else
                             before_next.call if before_next
-                            before_next = proc { waitrt? }
                             fput command
-                            before_next = proc { waitfor '<prompt'; waitrt? }
+                            before_next = proc { waitfor '<prompt'; status_until("Waiting for RT", checkrt > 0){waitrt?} }
                         end
                     }
                     processed_items += 1
                 }
             else
                 msg = ['']
-                header = "[#{container_names[container]}]: "
+                header = "[#{container_name}]: "
                 if @stormfront
                     header = REXML::Text.new(header).to_s
                     msg << "<preset id=\"whisper\">#{header}</preset>"
@@ -1437,6 +1762,107 @@ module ForeachScript
             return text
         end
     end
+
+    def self.qb_hook
+        return unless @stormfront
+        UpstreamHook.add(self.anon_hook, proc{|line|
+            if line =~ /<c>_qlink change (.*)$/
+                if $1 == 'quick-foreach'
+                    puts '<switchQuickBar id="quick-foreach"/>'
+                    next nil
+                else
+                    @quickbar_id = $1
+                end
+            end
+            line
+        })
+    end
+
+    def self.qb_refresh(status: nil, item: nil, items_processed: nil, items_total: nil, percent: nil)
+        return unless @stormfront
+
+        unless @quickbar_elements
+            @quickbar_elements = {}
+            root = REXML::Element.new("openDialog")
+            root.attributes['id'] = "quick-foreach"
+            root.attributes['location'] = 'quickBar'
+            root.attributes['title'] = 'foreach'
+            @quickbar_elements[:root] = root
+            echo @quickbar_elements[:root].inspect
+
+            @quickbar_elements[:data] = data = root.add_element(
+                "dialogData",
+                {
+                    'id' => 'quick-foreach',
+                    'clear' => true
+                })
+            data.add_element('label', {'id' => 'foreachLabel', 'value' => 'Foreach: '})
+
+            @quickbar_elements[:status] = data.add_element('label', {'id' => 'foreachStatusLabel', 'value' => 'Running'})
+
+            data.add_element("sep")
+
+            data.add_element("link", {
+                'id' => "foreachKill",
+                'value' => "stop",
+                'cmd' => "#{$lich_char}kill #{@script.name}"
+            })
+
+            data.add_element("sep")
+
+            @quickbar_elements[:pause] = data.add_element("link", {'id' => "foreachPauseResume" })
+
+            data.add_element("sep")
+
+            @quickbar_elements[:item] = data.add_element("sep", {'id' => "foreachItemData"})
+
+            # Start 'are we paused?' watchdog.
+            paused = @script.paused?
+            watchdog = Thread.new {
+                while true
+                    sleep 0.25
+                    new_paused = @script.paused?
+                    if new_paused != paused
+                        paused = new_paused
+                        qb_refresh
+                    end
+                end
+            }
+            before_dying { watchdog.kill }
+        end
+
+        @quickbar_status = status if status
+        if @script.paused?
+            status = 'Paused'
+        else
+            status = @quickbar_status
+        end
+        @quickbar_elements[:status].attributes['value'] = status
+
+        a = @quickbar_elements[:pause].attributes
+        if status == 'Paused'
+            a['value'] = "resume"
+            a['cmd'] = "#{$lich_char}unpause #{@script.name}"
+        else
+            a['value'] = "pause"
+            a['cmd'] = "#{$lich_char}pause #{@script.name}"
+        end
+
+        if item
+            type = item.type
+            type = '(no type)' if type == '' || type.nil?
+            @quickbar_elements[:item].attributes['value'] = "[#{items_processed+1}/#{items_total}] (#{percent}%) ##{item.id} \"#{item.full_name}\" (#{type})"
+        end
+
+        xml = @quickbar_elements[:data].to_s
+        return if @quickbar_previous == xml
+        if @quickbar_previous
+            puts xml
+        else
+            puts "#{@quickbar_elements[:root].to_s}<switchQuickBar id=\"quick-foreach\" />"
+        end
+        @quickbar_previous = xml
+    end
 end
 
 if defined?(GameObj.type_data)
@@ -1454,5 +1880,14 @@ if defined?(GameObj.type_data)
     end
 end
 
+if EXPERIMENTAL_EXPIRES
+    if EXPERIMENTAL_EXPIRES > Time.now
+        echo "** This is an EXPERIMENTAL foreach build.  It should be updated by #{EXPERIMENTAL_EXPIRES}."
+    else
+        echo "** This is an OUTDATED EXPERIMENTAL foreach build.  It should probably have been updated by now.  It expired at#{EXPERIMENTAL_EXPIRES}."
+        echo "You can still use it, but you may encounter bugs and minor annoyances."
+        sleep 2  # Minor annoyances.
+    end
+end
 
 ForeachScript.run(script)

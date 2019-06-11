@@ -30,37 +30,41 @@ if not command or command == "help"
 	# Code shamelessly plundered from mapmap
 	script_starter = "#{$lich_char}#{script.name}"
 	script_spacerr = ''.ljust(script_starter.length, ' ')
-	respond
-	respond "This script manually updates your local map database in a simple four-step process:"
-	respond "   1. Add the current room you're in (if it's not already in the DB)"
-	respond "   2. Perform the specified command (e.g. GO DOOR or NORTH)"
-	respond "   3. Add the room you arrive in (if it's not already in the DB)"
-	respond "   4. Update the appropriate movement information for the origin room."
-	respond ""
-	respond "The database will not be updated if the move command fails or you otherwise end up in the same room"
-	respond "that you started in."
-	respond
-	respond "Changes this script makes to your map database are not saved immediately.  Use #{script_starter} SAVE"
-	respond "or invoking another script that saves map changes (e.g. #{$lich_char}mapmap) will cause changes to be"
-	respond "saved."
-	
-	respond
-	respond "Usage:"
-	respond
-	respond "   #{script_starter} help       Shows this help text."
-	respond
-	respond "   #{script_starter} inspect    Inspect the current room."
-	respond
-	respond "   #{script_starter} create     Create current room in the map database if it doesn't exist, "
-	respond "   #{script_spacerr}            then inspect it."
-	respond
-	respond "   #{script_starter} save       Save the map database."
-	
-	respond
-	respond "   #{script_starter} MOVEMENT   Execute MOVEMENT (e.g. 'go doorway') and record the result."
-	respond
-	respond "This script is not foolproof."
-	respond
+	msg = []
+	msg << "This script manually updates your local map database in a simple four-step process:"
+	msg << "   1. Add the current room you're in (if it's not already in the DB)"
+	msg << "   2. Perform the specified command (e.g. GO DOOR or NORTH)"
+	msg << "   3. Add the room you arrive in (if it's not already in the DB)"
+	msg << "   4. Update the appropriate movement information for the origin room."
+	msg << ''
+	msg << "The database will not be updated if the move command fails or you otherwise end up in the same room"
+	msg << "that you started in."
+	msg << ''
+	msg << "Changes this script makes to your map database are not saved immediately.  Use #{script_starter} SAVE"
+	msg << "or invoking another script that saves map changes (e.g. #{$lich_char}mapmap) will cause changes to be"
+	msg << "saved."
+
+	msg << ''
+	msg << "Usage:"
+	msg << ''
+	msg << "   #{script_starter} help       Shows this help text."
+	msg << ''
+	msg << "   #{script_starter} inspect    Inspect the current room."
+	msg << ''
+	msg << "   #{script_starter} create     Create current room in the map database if it doesn't exist, "
+	msg << "   #{script_spacerr}            then inspect it."
+	msg << ''
+	msg << "   #{script_starter} retarget OLDID NEWID"
+	msg << "   #{script_spacerr}            Change exits in current room that point to OLD to now point to NEW"
+	msg << ''
+	msg << "   #{script_starter} save       Save the map database."
+
+	msg << ''
+	msg << "   #{script_starter} MOVEMENT   Execute MOVEMENT (e.g. 'go doorway') and record the result."
+	msg << ''
+	msg <<  "This script is not foolproof."
+	msg << ''
+    respond msg
 	exit
 end
 
@@ -90,6 +94,40 @@ if command == "save"
 	Map.save
 	echo "map data saved"
 	exit
+end
+
+if command =~ /^retarget(.*)$/
+    if $1 =~ /\s+(\d+)\s+(\d+)$/
+        old = $1
+        new = $2
+
+        rm = Room.current
+
+        if rm.wayto[new] or rm.timeto[new]
+            echo "This room already has a wayto or timeto that goes to room #{new}"
+            exit
+        end
+
+        if rm.wayto[old]
+            rm.wayto[new] = rm.wayto[old]
+            echo "#{rm.id} => #{new}: wayto set to #{rm.wayto[new].inspect}"
+            if rm.timeto[old]
+                rm.timeto[new] = rm.timeto[old]
+            else
+				rm.timeto[new] = 0.2
+				echo "#{rm.id} => #{old}: WARNING: No timeto was set."
+            end
+			echo "#{rm.id} => #{new}: timeto set to #{rm.timeto[new].inspect}"
+			echo "#{rm.id} => #{old}: wayto cleared" if rm.wayto.delete(old)
+			echo "#{rm.id} => #{old}: timeto cleared" if rm.timeto.delete(old)
+        else
+            echo "This room does not conect to room #{old}"
+        end
+        exit
+    else
+        echo "Incorrect syntax.  See help."
+        exit
+    end
 end
 	
 is_direction = ["north","south","east","west","northeast","northwest","southeast","southwest","ne","nw","se","sw","out","up","down"].any?{ |dir| dir.start_with?(command) }

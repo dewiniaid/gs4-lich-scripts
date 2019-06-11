@@ -1,4 +1,4 @@
-# Foreach 0.9.9
+# Foreach 0.10
 
 *Stop the up-up-up-enter!*
 
@@ -44,9 +44,9 @@ While not a full replacement for "proper" purpose-built Lich scripts, it is stil
      
 ## That's nice.  But what can it REALLY do?
 
-Usage: **;foreach** _[options]_ _[what]_ **in/on** _target_ [**;** _command1_**;** _command2_**;** ...]  
-*or:*  **;foreach** _[options]_ _[what]_ **in/on** _target_ [**/** _command1_**/** _command2_**/** ...]  
-*or:*  **;foreach** _[options]_ _[what]_ **in/on** _target_ [**|** _command1_**|** _command2_**|** ...]
+Usage: **;foreach** _[options]_ _[what]_ **in/on/under/behind** _targets_ [**;** _command1_**;** _command2_**;** ...]  
+*or:*  **;foreach** _[options]_ _[what]_ **in/on/under/behind** _targets_ [**/** _command1_**/** _command2_**/** ...]  
+*or:*  **;foreach** _[options]_ _[what]_ **in/on/under/behind** _targets_ [**|** _command1_**|** _command2_**|** ...]
 
 ### Options
 
@@ -66,8 +66,16 @@ of the following:
 * **first _N_**  
   Stop after _N_ matching items have been encountered.  (The word `first` is optional)
 * **skip _N_** _or_ **after _N_**  
-  Skip the first _N_ matching items.  
-
+  Skip the first _N_ matching items.
+* **sort** or **sorted**  
+  Sort items by name within each respective container.  Articles "a", "an", "some" and "the" are ignored when sorting.  
+  Containers will still be handled one at a time, and the order of the containers themselves is not affected.
+* **reverse** or **reversed**  
+  Reverse the order of items within each container.  If used alone, this means the last item in each container in
+  processed first and vice versa.  If used with **sorted**, items will be handled in descending alphabetical order
+  rather than ascending.
+  Containers will still be handled one at a time, and the order of the containers themselves is not affected.
+  
 Options are applied roughly in the order listed above.  You can combine **first** with **skip**: 
 `;foreach first 5 after 10` will match items 11 through 15.
 
@@ -79,6 +87,8 @@ _what_ allows you to filter the types of items `foreach` acts on.  It can be one
    You can specify any type of item that Lich knows about.  Examples include 'gem', 'wand' and 'scroll' 
    (which includes things like palimpests and other 'alternate names' for scrolls).  `;foreach` by itself will show all
    the known types.  `;foreach in inv` with no commands will show the types of all items it finds.
+   
+   You can use `type=none` to explicitly find items that have no defined type according to Lich. 
    
    **Note:** This is only as accurate as Lich's own type data.  You may be able to get more accurate type data by downloading and running the `gameobjadd` script at startup.
 
@@ -103,10 +113,11 @@ _pattern_ can be:
   * `this,that`: Match any one of the options separated by commas.
   * `blue sapphire,emerald,*diamond,*emerald,uncut ruby`: You can mix the above.
   
-### Target
+### Targets
 
-_target_ tells ;foreach where you want to find the items.  You can specify any container exactly like you'd specify it to
-a command in game, but there's also a few special options:
+_targets_ tells ;foreach where you want to look for the items.  You can specify one or more _target_, separated by commas.
+
+Each target can be the name of an actual container in game ("cloak", "my backpack", etc.), or one of the following options:
 
 * **inv** or **inventory**  
   Examines the contents all containers in your inventory.
@@ -124,11 +135,14 @@ a command in game, but there's also a few special options:
   Examines items in your inventory, *not* their contents.  Want to register everything you are wearing?  
   `foreach in worn; remove item;register item;wear item`
   
-* **last**  
+* **last** or **previous**  
   Last is a set of items that matches whatever the last run of foreach found.  You can use this to quickly undo if you
   manage to flub something up, like accidentally moving all of your inventory to your locker rather than just your boxes.
   
-  If you specified a _what_ (above section), it will further restrict the list of what foreach is working on   
+  When using **last**, the container items are reported in will be the container they started the previous run in -- not
+  their current location.
+  
+  If you specified a _what_ (above section), it will further restrict the list of what foreach is working on.
   
 ### Commands
 
@@ -327,7 +341,9 @@ Depending on the level of depth you want, either just read the bold parts, just 
        If, after all of the above, ;foreach doesn't have status data for the container (meaning it's probably not in your inventory),
        it assumes that it won't have status data for any of its contents either and exits.
        
-4. **Item Filtering**: For each container and list of items in to_filter, items are filtered based on your criteria, 
+4. **Item Sorting**: If the SORTED or REVERSED options are specified, they are applied to each container inventory. 
+
+5. **Item Filtering**: For each container and list of items in to_filter, items are filtered based on your criteria, 
    including applying any options (e.g. `UNIQUE`, `MARKED`, `FIRST 5`).  If you're filtering by status and any item is
    not found in the the table, `;foreach` complains loudly and exits.  This particular failure should never occur,
    since of all the related checks should have happened earlier.
@@ -335,10 +351,10 @@ Depending on the level of depth you want, either just read the bold parts, just 
    Any containers that have items left after the filtering phase are removed from the relevant tables.
    If no remaining items exist, ;foreach exits.
    
-5. **Snapshot**: At this point, ;foreach knows every single item and container it is going to work on.  This information
+6. **Snapshot**: At this point, ;foreach knows every single item and container it is going to work on.  This information
    is saved for later usage in `;foreach in last`, and then the execution phase begins
    
-6. **Execution**: For each container:
+7. **Execution**: For each container:
    * If there are no commands, pretty-print a list of matching contents in that container.
    * Otherwise, for each item in the container, for each command:
      * Replace "item", "noun", "name" and "container" with the item ID, item noun, item name and container ID.
@@ -357,8 +373,24 @@ Depending on the level of depth you want, either just read the bold parts, just 
        would scroll by while in roundtime, or the script waiting to pause (and thus preventing it from being unpaused
        until you are out of roundtime)
 
-
 ## Changelog
+
+### Version 0.10 (2019-06-10)
+  * Foreach now reports its status in the shortcut bar in Stormfront, and can be paused, resumed, or killed from that location.
+  * You can now look under/behind containers instead of just in/on them.
+  * Legacy premium locker searching now looks ON armor stands and weapon racks rather than IN them.    
+    (This code only triggers if LOCKER MANIFEST fails for whatever reason).
+  * Pattern matching is no longer case-sensitive  
+    `;foreach q=elan*pack in pack` should now match "an Elanthian Guilds voucher pack"
+  * You can now `;foreach sorted ...` to iterate over items sorted by their full name within their containers.  
+    * Articles a/an/some/the are ignored when sorting, so "some ambrominas leaf" sorts before than "a clear zircon"
+    * This does not affect the order containers are traversed. 
+  * You can now `;foreach reversed ...` to iterate over items backwards within their containers.
+    * When combined with `sorted`, this does items in descending order.
+    * This does not affect the order containers are traversed.
+  * You can now specify multiple targets in a single `;foreach command`  
+    Example: `;foreach gem in backpack,cloak,Wyrom disk,locker ...`
+  * `;foreach type=none ...` will now match items that have no explicit type defined.
 
 ### version 0.9.9 (2019-05-24)
   * Add `UNMARK` shortcut for `MARK <item> REMOVE`

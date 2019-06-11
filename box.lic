@@ -60,12 +60,13 @@
 	  tags: lockpicking
 	  required: Lich >= 4.6.0.
 
-  version: 0.10 (2017-07-15)
+  version: 0.10 (2017-07-21)
 
   changelog:
-    version 0.10 (2017-07-15)
+    version 0.10 (2017-07-21)
       * Significantly refactored internal stuff behind the scenes
-      * Can now use wearable lockpicks.
+      * `;box measure` now injects the lock difficulty numbers into the measuring output.
+      * Now supports wearable lockpicks and other tools.
 
     version 0.9 (2017-07-01)
       * Added ;box trick <trick> as a convenience shortcut for setting your lockpicking command to use the specified LM trick.
@@ -162,23 +163,24 @@ unless $_box_script_status
 end
 
 module BoxScript
-    VERSION = '0.10 (2017-07-15)'
+    VERSION = '0.10 (2017-07-21)'
     BOX_NOUNS = %w(box strongbox chest coffer trunk).to_set
-    #
-    # def lock_difficulties
-    #     result = {}
-    #     [
-    #         'primitive', 'rudimentary', 'extremely easy', 'very easy', 'easy', 'very basic', 'fairly easy', 'simple',
-    #         'fairly simple', 'fairly plain', 'moderately well-crafted', 'well-crafted', 'tricky', 'somewhat difficult',
-    #         'moderately difficult', 'very well-crafted', 'difficult', 'extremely well-crafted', 'very difficult',
-    #         'fairly complicated', 'intricate', 'amazingly well-crafted', 'very complex', 'impressively complicated',
-    #         'amazingly intricate', 'extremely difficult', 'extremely complex', 'masterfully well-crafted',
-    #         'amazingly complicated', 'astoundingly complex', 'incredibly intricate', 'absurdly well-crafted',
-    #         'exceedingly complex', 'absurdly difficult', 'masterfully intricate', 'unbelievably complicated',
-    #         'masterfully intricate', 'absurdly complex', 'impossibly complex'
-    #     ].each_with_index{|k, v| result[k] = v}
-    #     return result
-    # end
+    unless defined?(LOCK_DIFFICULTIES)
+        LOCK_DIFFICULTIES = {}
+        [
+            'primitive', 'rudimentary', 'extremely easy', 'very easy', 'easy', 'very basic', 'fairly easy', 'simple',
+            'fairly simple', 'fairly plain', 'moderately well-crafted', 'well-crafted', 'tricky', 'somewhat difficult',
+            'moderately difficult', 'very well-crafted', 'difficult', 'extremely well-crafted', 'very difficult',
+            'fairly complicated', 'intricate', 'amazingly well-crafted', 'very complex', 'impressively complicated',
+            'amazingly intricate', 'extremely difficult', 'extremely complex', 'masterfully well-crafted',
+            'amazingly complicated', 'astoundingly complex', 'incredibly intricate', 'absurdly well-crafted',
+            'exceedingly complex', 'absurdly difficult', 'masterfully intricate', 'unbelievably complicated',
+            'masterfully intricate', 'absurdly complex', 'impossibly complex'
+        ].each_with_index{|k, v|
+            LOCK_DIFFICULTIES[k] = v
+        }
+    end
+    #echo LOCK_DIFFICULTIES.inspect
 
     class RingBuffer
         # Only partially implemented -- just what we use.
@@ -271,18 +273,19 @@ module BoxScript
             # All words are exact matches.
             /^#{words.join("\\b.*\\b")}$/i,
             # Fully anchored suffix matches.
-            /^#{words.join("\\S*\\s+")}\S*$/i,
+            /^#{words.join("\\S*\\s+(?:.*\\s+)?")}\S*$/i,
             # All words are prefix matches, not neccessarily anchored
-            /\b#{words.join("\\S+.*\\b")}\S*$/i
+            /\s+#{words.join(".*\\s+")}\S*$/i
         ]
     end
 
     def self.find_item(what, haystack, strip_my=true, **result_args)
         if what.is_a?(String)
-            what = get_item_patterns(string)
+            what = get_item_patterns(what)
         elsif what.is_a?(Regexp)
             what = [what]
         end
+        # echo what.inspect
         what.each{|pattern|
             result = haystack.find{|x| x.name =~ pattern}
             return ItemResult.new(result, **result_args) if result
@@ -308,13 +311,16 @@ module BoxScript
 
             GameObj.inv.each{|container|
                 next unless container.contents and container.contents.length > 0
-                if CharSettings[:ignore].include?(container.full_name)
+                #echo CharSettings[:ignored].inspect
+                #echo container.name
+                if CharSettings[:ignored].include?(container.name)
                     next if ignored_result
                     ignored_result = find_item(pattern, container.contents, container: container.id, ignored: true)
                     next
+                else
+                    result = find_item(pattern, container.contents, strip_my, container: container.id)
+                    return result if result
                 end
-                result = find_item(pattern, container.contents, strip_my, container: container.id)
-                return result if result
             }
 
             if CharSettings[:worn] == :last
@@ -484,6 +490,16 @@ module BoxScript
             msg << ''
             msg << "   #{script} RELOCK [<lockpick>] Like UNLOCK, but relocks the box instead using Lock Mastery."
             msg << ''
+            msg << "   #{script} FETCH <tool>        Fetches the specified tool using the same matching logic as in UNLOCK."
+            msg << "   #{spacer}                     The tool in question will be remembered and returned stored as normal."
+            msg << ''
+            msg << "   #{script} STORE               Store the tool that was last fetched by returning it to its original location,"
+            msg << "   #{spacer}                     if known."
+            msg << ''
+            msg << "   #{script} CHART [<search>]    Shows a table of lock difficulties, possibly only those matching <search>."
+            msg << ''
+            msg << "   #{script} RELOCK [<lockpick>] Like UNLOCK, but relocks the box instead using Lock Mastery."
+            msg << ''
             msg << "   #{script} CALIPERS [<item>]   Set or show which calipers you are currently using."
             msg << ''
             msg << "   #{script} MEASURE             Measure the box you are holding with your calipers."
@@ -528,6 +544,16 @@ module BoxScript
         respond msg.join("\n")
 
         status_command
+    end
+
+    def self.inject_info(line)
+        line.gsub!(/Measuring carefully, it looks to be an? (.+) lock\./){|match|
+            n = LOCK_DIFFICULTIES[$1]
+            next(line) unless n
+            n *= 40
+            "#{$&}  (Between -#{n == 0 ? 5 : n} and -#{n+35}.)"
+        }
+        return line
     end
 
     def self.status_command(args = nil)
@@ -590,9 +616,6 @@ module BoxScript
     end
 
     def self.accept_command(args, store=true)
-        @script.want_downstream = true
-        @script.want_downstream_xml = false
-
         $_box_script_status[:last_tool].store
         wait = false
         waiting = false
@@ -616,7 +639,7 @@ module BoxScript
                     return
                 end
             end
-            if line =~ /^You accept <a exist="-?\d+" noun="([^"]+)">.+<\/a> offer and are now holding (?:(.*) )?<a exist="-?\d+" noun="([^"]+)">(?:(.*) )?(?:box|strongbox|coffer|chest|trunk)<\/a>\./
+            if line =~ /You accept <a exist="-?\d+" noun="([^"]+)">.+<\/a> offer and are now holding (?:(.*) )?<a exist="-?\d+" noun="([^"]+)">(?:(.*) )?(?:box|strongbox|coffer|chest|trunk)<\/a>\./
                 box = [$2, $4, $3].find_all{|x| x}.join(' ')
                 CharSettings[:customer] = {
                     :name => $1,
@@ -672,9 +695,9 @@ module BoxScript
         end
         # echo CharSettings['customer'].inspect
         c = CharSettings[:customer]
-        name = c['name'] unless name
+        name = c[:name] unless name
         waitrt?
-        fput "give my #{c['adjective']} #{c['noun']} to #{name}"
+        fput "give #{c[:noun]} to #{name}"  #FIXME
     end
 
     def self.next_command(name = nil)
@@ -775,28 +798,71 @@ module BoxScript
         fput "drop ##{box.id}"
     end
 
-    def self.disarm_detect_command(args, command)
-        box = find_held_box
+    def self.get_box_and_tool(
+        toolname=nil,
+        box_not_found: 'You do not appear to be holding a box.',  # Shown if the box is not found
+        tool_not_found: 'Could not find that tool.',  # Shown if the tool is not found.
+        tool_ignored: "I could only find that item in '%C', which is an ignored container.",  # Shown if the tool is in an ignored container.
+        hands_full: 'Your hands appear to be full.',  # Shown if hands are full (and the box and tool aren't what's being held)
+        no_tool: nil  # Shown if the non-box hand is empty and no tool was found.  Not an error if nil.
+    )
+        box = nil
+        offhand = nil
+
+        @holding.each{|item|
+            next unless item.id
+            if BOX_NOUNS.include?(item.noun) and box.nil?
+                box = item
+            else
+                offhand = item
+            end
+        }
+
         unless box
-            echo "You don't appear to have a box in your hands."
-            return
+            echo box_not_found
+            return nil, nil
         end
-        other_hand = @holding.find{|item| item.id != box.id}
-        if args
-            tool = find_item_anywhere(args)
+
+        toolname = toolname.strip if toolname
+
+        if toolname and toolname != ''
+            tool = find_item_anywhere(toolname)
             unless tool
-                echo 'Could not find that tool.'
-                return
+                echo tool_not_found
+                return nil, nil
             end
-            unless tool.held or other_hand.nil? or other_hand.id.nil?
-                unless $_box_script_status[:last_tool] and $_box_script_status[:last_tool].store
-                    echo 'Your hands appear to be full.'
-                    return
+            if tool.ignored
+                echo tool_ignored.gsub('%C', GameObj.inv.find{|x| x.id == tool.container}.full_name)
+                return nil, nil
+            end
+            unless tool.held
+                unless offhand.nil? or tool.item.id == offhand.id
+                    unless $_box_script_status[:last_tool] and $_box_script_status[:last_tool].store
+                        echo hands_full
+                        return nil, nil
+                    end
                 end
+
+                tool.fetch
+                $_box_script_status[:last_tool] = tool
+                # We don't update the last tool if we're already holding it, because that means we lose the data
+                # about what container/etc it originally came from.
+                offhand = tool.item
             end
-            tool.fetch
-            $_box_script_status[:last_tool] = tool
+        elsif offhand.nil? and no_tool
+            echo no_tool
+            return nil, nil
         end
+        return box, offhand
+    end
+
+    def self.disarm_detect_command(args, command)
+        if command == 'detect'
+            $_box_script_status[:last_tool].store
+            args = nil
+        end
+        box, item = get_box_and_tool(args)
+        return unless box
 
         checknewbox(box)
         waitrt?
@@ -812,46 +878,19 @@ module BoxScript
         empty_hands_message,
         &block
     )
-        new_last_tool = new_last_container = nil
-        box = find_held_box
-        unless box
-            echo "You don't appear to have a box in your hands."
-            return
-        end
+        box, item = get_box_and_tool(
+            args,
+            tool_not_found: tool_not_found_message,
+            tool_ignored: tool_ignored_message,
+            no_tool: empty_hands_message
+        )
+        return unless box
         checknewbox(box)
-        other_hand = hands.find{|item| item.id != box.id}
 
-        if args
-            tool = find_item_anywhere(args)
-            unless tool
-                echo tool_not_found_message
-                return
-            end
-            if tool.ignored
-                echo tool_ignored_message.gsub('%C', GameObj.inv.find{|x| x.id==container_id}.full_name)
-                return
-            end
-            unless tool.held or other_hand.id.nil?
-                unless $_box_script_status[:last_tool] and $_box_script_status[:last_tool].store
-                    echo 'Your hands appear to be full.'
-                    return
-                end
-            end
-            tool.fetch
-            item = tool.item
-        else
-            tool = nil
-            item = other_hand
-            unless item.id
-                echo empty_hands_message
-                return
-            end
-        end
         waitrt?
-        $_box_script_status[:last_tool] = tool if tool
         substitutions = {'$B' => "##{box.id}", '$L' => "##{item.id}", '$T' => "##{item.id}"}
         command = template.gsub(/\$[BLT]/i, substitutions)
-        if block_given? and window_allowed?
+        if block_given?
             yield box, item
         end
         fput command
@@ -865,6 +904,7 @@ module BoxScript
             "I could only find that lockpick in '%C', which is an ignored container.",
             'You don\'t appear to holding a lockpick.'
         ) {|box, tool|
+            next unless window_allowed?
             start_capture(
                 /attempt \(d100=|^Um, but it's open\.|^It does not appear to be locked\./, RingBuffer.new(2), "\n[Using your #{tool.name}]\n"
             )
@@ -883,6 +923,7 @@ module BoxScript
             "I could only find that lockpick in '%C', which is an ignored container.",
             'You don\'t appear to holding a lockpick.'
         ) {|box, tool|
+            next unless window_allowed?
             start_capture(
                 /attempt \(d100=|^You should close the .* before you try locking it\.|^The .* is already locked!/, RingBuffer.new(2), "\n[Using your #{tool.name}]\n"
             )
@@ -901,32 +942,40 @@ module BoxScript
             stage = 0
             buffer = nil
             timeout = Time::now + 60
+            window = window_allowed?
 
-            DownstreamHook.add('box_capture_script', proc {|line|
-                DownstreamHook.remove('box_capture_script') if Time::now > timeout
+            DownstreamHook.add('BoxScript::WindowCapture', proc {|line|
+                DownstreamHook.remove('BoxScript::WindowCapture') if Time::now > timeout
                 case stage
                     when 0
                         if line =~ /The .* isn't even closed\./
-                            write_window(line)
-                            line += condense
+                            if window
+                                write_window(line)
+                                line += condense
+                            end
                             DownstreamHook.remove('box_capture_script')
                         elsif line.include?(starttrigger)
                             stage = 1
-                            buffer = ["\n", line]
+                            buffer = ["\n", line] if window
                         end
                     when 1
                         if line.include?('<prompt')
-                            write_window(buffer)
-                            line += condense
-                            buffer = nil
+                            if window
+                                write_window(buffer)
+                                line += condense
+                                buffer = nil
+                            end
                             stage = 2
-                        else
+                        elsif window
                             buffer.push(line)
                         end
                     when 2
                         if line.start_with?('Measuring carefully, ')
-                            write_window(line)
-                            line += condense
+                            line = self.inject_info(line)
+                            if window
+                                write_window(line)
+                                line += condense
+                            end
                             DownstreamHook.remove('box_capture_script')
                         end
                     else
@@ -945,7 +994,8 @@ module BoxScript
             "I could only find your calipers in '%C', which is an ignored container.",
             'You don\'t appear to holding calipers.'
         ) {|box, tool|
-            start_capture("You make some effort to fine-tune the <a exist=\"#{tool.id}\"")
+            start_capture(/^You make some effort to fine-tune the <a exist="#{tool.id}"|^Those calipers could not be more perfectly calibrated\.|^You're good, but you're not that good\./)
+            # start_capture("You make some effort to fine-tune the <a exist=\"#{tool.id}\"")
         }
     end
 
@@ -980,12 +1030,12 @@ module BoxScript
                 echo "Ignored containers list cleared."
                 return
             end
-            item = find_matching_item(GameObj.inv, text_to_words(args))
+            item = find_item(args, GameObj.inv)
             unless item
                 echo "Could not find anything matching '#{args}' in your inventory."
                 return
             end
-            name = item.full_name
+            name = item.item.full_name
             if ignore
                 if CharSettings[:ignored].add?(name)
                     echo "Added '#{name}' to the ignored containers list."
@@ -1057,6 +1107,27 @@ module BoxScript
         end
     end
 
+    def self.chart_command(args)
+        args = args.strip
+        if args.length > 0
+            pattern = /#{args.split(/\s+/).map{|x| Regexp::escape(x)}.join('.*')}/i
+        else
+            pattern = //  # null pattern
+        end
+
+        response = []
+        LOCK_DIFFICULTIES.each{|k, v|
+            next unless k=~ pattern
+            a = v == 0 ? 5 : v*40
+            b = v*40 + 35
+            response << "#{a.to_s.rjust(4)} to #{b.to_s.rjust(4)}: #{k}"
+        }
+
+        #response = []
+        #formatted.each{|k, v| response << "#{k.ljust(length, '..',)}: #{v}" }
+        respond response.join("\n")
+    end
+
     def self.fetch_command(args)
         tool = find_item_anywhere(args)
         unless tool
@@ -1064,7 +1135,7 @@ module BoxScript
             return
         end
         if tool.ignored
-            echo "The best I could find was '#{tool.full_name}', which was located in the ignored container '#{GameObj.inv.find{|x| x.id==container_id}.full_name}.'"
+            echo "The best I could find was '#{tool.item.full_name}', which was located in the ignored container '#{GameObj.inv.find{|x| x.id == tool.container}.full_name}.'"
             return
         end
         if tool.held
@@ -1077,6 +1148,10 @@ module BoxScript
     end
 
     def self.run(script)
+        # before_dying {
+        #     DownstreamHook.list{|hook| DownstreamHook.remove(hook) if hook =~ /^BoxScript::/ }
+        # }
+        #
         @script = script
         @script.want_upstream = false
         @script.want_downstream = false
@@ -1156,6 +1231,8 @@ module BoxScript
                 ignore_command(args, false)
             # when 'picksack'
             #   picksack_command(args)
+            when 'chart'
+                chart_command(args)
             when 'debug'
                 echo $_box_script_status.inspect
                 echo CharSettings.to_hash.inspect
@@ -1244,12 +1321,12 @@ module BoxScript
         timeout = Time::now + timeout
         create_window
 
-        DownstreamHook.add('box_capture_script', proc {|line|
-            DownstreamHook.remove('box_capture_script') if Time::now > timeout
+        DownstreamHook.add('BoxScript::WindowCapture', proc {|line|
+            DownstreamHook.remove('BoxScript::WindowCapture') if Time::now > timeout
             if line.strip.length > 0
                 if output
                     if line.include?('<prompt')
-                        DownstreamHook.remove('box_capture_script')
+                        DownstreamHook.remove('BoxScript::WindowCapture')
                         write_window(output, false)
                         line += condense
                     else

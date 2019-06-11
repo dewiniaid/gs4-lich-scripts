@@ -30,9 +30,15 @@
 	  tags: Magic, QOL
 	  required: Lich >= 4.6.0.
 
-  version: 0.4.2 (2017-06-16)
+  version: 0.4.4 (2017-07-15)
 
   changelog:
+    version 0.4.4 (2017-07-15)
+      * Fix errant character that MIGHT have broken the script for everyone.  Hurray for typing in wrong window.
+
+    version 0.4.3 (2017-07-14)
+      * Fix 1213 falloff message.  Seriously, this went over a month with no reports until I saw it myself?  C'mon guys :p
+
     version 0.4.2 (2017-06-17)
       * Fix group heroism.  Really.
 
@@ -96,7 +102,7 @@
 
 
 class SpellMerge
-    VERSION = '0.4.2 (2017-06-17)'
+    VERSION = '0.4.3 (2017-07-14)'
 
     DEFAULT_SETTINGS = {
         'delay' =>  0.1,   # Spell merge delay, in seconds.
@@ -276,7 +282,7 @@ class SpellMerge
                    'For a brief moment, @ muscles ripple all across their bodies. A heightened sense of awareness can be seen in their eyes.',
         ),
         Effect.new(1213,
-                   '@ muscles seem to strain for an instant.  A sense of loss can be seen in .* eyes.',
+                   '/@ muscles seem to strain for an instant.  A sense of loss can be seen in .* eyes./',
                    proc{|names| "The muscles of #{names.gsub("'s", '')} seem to strain for an instant.  A sense of loss can be seen in their eyes." }
         ),
 
