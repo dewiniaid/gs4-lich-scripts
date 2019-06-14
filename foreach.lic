@@ -1947,7 +1947,7 @@ module ForeachScript
                             waitfor $1
                             script.want_downstream_xml = true
                             script.want_downstream = false
-                            before_next = proc { status_until("Waiting for RT", checkrt > 0){waitrt?} }
+                            before_next = proc { statusbar.status_until("Waiting for RT", checkrt > 0){waitrt?} }
                         elsif command =~ /^waitre (.*)$/i
                             text = $1
                             flags = nil
@@ -1957,7 +1957,7 @@ module ForeachScript
                             end
                             pattern = Regexp::new(text, flags)
                             statusbar.status_until("Waiting"){ nil until get =~ pattern }
-                            before_next = proc { status_until("Waiting for RT", checkrt > 0){waitrt?} }
+                            before_next = proc { statusbar.status_until("Waiting for RT", checkrt > 0){waitrt?} }
                         elsif command =~ /^pause$/i
                             percent = (100.0 * processed_items / total_items).to_i
                             msg = []
