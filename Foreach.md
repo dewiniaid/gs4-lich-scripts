@@ -186,8 +186,9 @@ Certain words within a command will be replaced with some detail about the curre
   
 #### Shortcuts
 For some normal game commands, typing `command` by itself is equivalent to `command item`.  Also, if one of these commands
-is the first command in the list, an implicit `get item` will be automatically added provided that the command refers to
-the item in some way.  These commands currently are: **drop**, **place**, **sell**, **put**, and **appraise** 
+is the first command in the list, an implicit `get item` might be automatically added provided that the command refers to
+the item in some way.  These commands currently are: **drop**, **place**, **sell**, **put**, **appraise**, **read**, 
+**look**, **inspect** and **analyze** 
 
 In addition, the following convenience shortcuts exist:
 
@@ -197,7 +198,8 @@ In addition, the following convenience shortcuts exist:
   
   **mv** is shorthand for **move**
   
-  Newer versions of foreach will use `_drag` (mimicking Stormfront drag-and-drop functionality) to reduce this from two commands to one when they think it is safe to do so.
+  Newer versions of foreach will use `_drag` (mimicking Stormfront drag-and-drop functionality) to reduce this from two
+  commands to one when they think it is safe to do so.
 
 * **fastmove** _[what]_ **to** _where_  
   This is a somewhat faster version of the above, but it's more prone to failing if you have oddly scripted containers
@@ -206,7 +208,8 @@ In addition, the following convenience shortcuts exist:
   
   This can be shortened as **fastmv**, **fmove** or **fmv**
 
-  Newer versions of foreach will use `_drag` (mimicking Stormfront drag-and-drop functionality) to reduce this from two commands to one when they think it is safe to do so.
+  Newer versions of foreach will use `_drag` (mimicking Stormfront drag-and-drop functionality) to reduce this from two
+  commands to one when they think it is safe to do so.
 
 * **stash** _[what]_  
   This tries to store _what_ in your defined lootsack.  If it is full, it tries lootsack2 and so on.
@@ -374,6 +377,28 @@ Depending on the level of depth you want, either just read the bold parts, just 
        until you are out of roundtime)
 
 ## Changelog
+
+### Version 0.10.3 (2019-06-13)
+  * Overhauled Stormfront status bar updates.  They should no longer significantly slow down the script.  
+    Additionally, status bar updates are less frequent (except when they are the result of the script pausing
+    or resuming)
+  * Running ;foreach while ;foreach is already running (i.e. with ;force) no longer clobbers the statusbar in Stormfront.
+  * Immediate !commands now delay every 5 consecutive immediate commands rather than on every fifth item.
+  * `;foreach ... in backpack on table` should now work correctly.
+    - Note that a quirk in GS4's item parsing code means you will frequently need to use 'get item in container'
+      syntax when using foreach in this way.
+
+### Version 0.10.2 (2019-06-12)
+  * Sorting is now case-insensitive.
+  * Read, Look, Analyze and Inspect now add an implicit 'item' if needed.
+  * Giveitem now searches for a matching PC in the room at startup and autocompletes to that PC's full name.  
+    * It will error out immediately if no matching PCs are found or if more than one matching PC is found.  
+    * It will no longer fail when you do not type the character's name entirely with proper capitalization.  
+  * **Unspported:** Commands can be prefixed with a "!" to ignore various checks on usability in favor of speed.
+    *Use this at your own risk!*
+
+### Version 0.10.1 (2019-06-11)
+  * Fix marked/unmarked/registered/unregistered filters not working in some cases.
 
 ### Version 0.10 (2019-06-10)
   * Foreach now reports its status in the shortcut bar in Stormfront, and can be paused, resumed, or killed from that location.

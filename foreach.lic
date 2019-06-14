@@ -25,19 +25,42 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.10 (2019-06-19)
+  version: 0.10.3 (2019-06-13)
 
   changelog:
+    version 0.10.3 (2019-06-13)
+      * Overhauled Stormfront status bar updates.  They should no longer significantly slow down the script.
+        Additionally, status bar updates are less frequent (except when they are the result of the script pausing
+        or resuming)
+      * Running ;foreach while ;foreach is already running (i.e. with ;force) no longer clobbers the statusbar in Stormfront.
+      * Immediate !commands now delay every 5 consecutive immediate commands rather than on every fifth item.
+      * `;foreach ... in backpack on table` should now work correctly.
+        - Note that a quirk in GS4's item parsing code means you will frequently need to use 'get item in container'
+          syntax when using foreach in this way.
+
+    version 0.10.2 (2019-06-12)
+      * Sorting is now case-insensitive.
+      * Read, Look, Analyze and Inspect now add an implicit 'item' if needed.
+      * Giveitem now searches for a matching PC in the room at startup and autocompletes to that PC's full name.
+        - It will error out immediately if no matching PCs are found or more than one matching PC is found.
+        - It will no longer fail when you do not type the character's name entirely with proper capitalization.
+      * Unspported: Commands can be prefixed with a "!" to ignore various checks on usability in favor of speed.
+          Use at your own risk!
+
+    version 0.10.1 (2019-06-11)
+      * Fix marked/unmarked/registered/unregistered filters not working in some cases.
+
     version 0.10 (2019-06-10)
       * Foreach now reports its status to the shortcut bar in Stormfront, and can be paused, unpaused and killed from
-        that location.
+          that location.
       * You can now ;foreach ... under|behind ...  instead of just ;foreach ... in   and ;foreach ... on
+      * You can now ;foreach over multiple targets (;foreach in backpack,cloak,disk...)
       * Pattern matching is no longer case-sensitive.
-        ;foreach q=elan*pack in pack should match "an Elanthian Guilds voucher pack"
+          ;foreach q=elan*pack in pack should match "an Elanthian Guilds voucher pack"
       * `;foreach sorted ... in ...` will iterate over items alphabetically within their respective containers.
-        Articles a/an/some/the are ignored when sorting.  The order of which container is evaluated first is unchanged.
+          Articles a/an/some/the are ignored when sorting.  The order of which container is evaluated first is unchanged.
       * `;foreach reversed ... in ...` will iterate over items backwards within their respective containers.
-        This can be used to avoid changing container/room order, or in conjunction with 'sorted' to sort descending.
+          This can be used to avoid changing container/room order, or in conjunction with 'sorted' to sort descending.
       * Completely overhauled the item matching engine to make it easier to maintain going forward.
       * `;foreach type=none in ...` will now match items that have no explicit type."
 
@@ -45,11 +68,11 @@
       * Add UNMARK shortcut for MARK <item> REMOVE
       * Improved documentation, including updating the online documentation
       * Convenience shortcuts for in-game verbs should now trigger when abbreviated:
-        DRop, PLACe, SELl, APpraise, SELl, and REGister.
+          DRop, PLACe, SELl, APpraise, SELl, and REGister.
       * If the first command is `get`, `take`, `register`, `mark` or `unmark`, an implicit "get item" or
-        "remove item" will be added beforehand.  This behavior already existed for drop, place, sell and appraise.
+          "remove item" will be added beforehand.  This behavior already existed for drop, place, sell and appraise.
       * If the only command is appraise, register, mark, or unmark, items will be RETURNed
-        afterwards in addition to the implicit get/remove item at the start.
+          afterwards in addition to the implicit get/remove item at the start.
 
     version 0.9.3 (2019-05-24)
       * No longer times out if you `;foreach in empty container` and have FLAG SORTEDVIEW ON
@@ -62,19 +85,19 @@
 
     version 0.9.1 (2019-05-21)
       * You can now ;foreach quick=phrase in ... or ;foreach q=phrase in ... as an alternate method for matching items
-        This is equivalent to ;foreach fullname=*phrase* in ...   (note wildcards!)
+          This is equivalent to ;foreach fullname=*phrase* in ...   (note wildcards!)
 
-        This feature was documented in 0.9, but was not implemented in that release.
+          This feature was documented in 0.9, but was not implemented in that release.
 
     version 0.9 (2019-05-20)
       * You can now further filter displayed items with ';foreach [un]registered ... in ...` and
-        `;foreach [un]marked ... in ...``
+          `;foreach [un]marked ... in ...``
       * `;foreach in locker` will now open your locker if it is not already, and will close your locker when it exits
-        if it originally opened it.
+          if it originally opened it.
       * `;foreach in locker` in a premium locker will now try to use your locker manifest to avoid needing to scan
-        multiple containers.  This adds a substantial startup speed boost.  If this attempt fails, it is still
-        improved in that it will no longer examine the curtain, your disk, or any other non-locker containers in the
-        room.
+          multiple containers.  This adds a substantial startup speed boost.  If this attempt fails, it is still
+          improved in that it will no longer examine the curtain, your disk, or any other non-locker containers in the
+          room.
       * Added some more pretty formatting to ;foreach help  (Stormfront only)
       * Make a second attempt at improving compatibility with the Profanity FE
 
@@ -93,7 +116,7 @@
       * Initial release
 =end
 
-# [JUST UPDATED] ;foreach 0.9, featuring filtering by marked/registered status, faster scans of premium lockers, and automatic locker opening/closing.  ;repo info foreach -- ;repo download foreach -- ;foreach help
+# [JUST UPDATED] ;foreach 0.10, featuring lots of updates, a few bugfixes, support for multiple targets, sorting, and more.  ;repo info foreach -- ;repo download foreach -- ;foreach help
 
 # [JUST UPDATED] ;foreach 0.9, featuring filtering by marked/registered status, faster scans of premium lockers, and automatic locker opening/closing.  ;repo info foreach -- ;repo download foreach -- ;foreach help
 
@@ -167,7 +190,7 @@ class ItemMatcher
 
     def add_item(item, container_id, container_name=nil, status_text=nil)
         return nil if @item_filter and not @item_filter.call(item)
-        return add_item!(item, container_id, container_name)
+        return add_item!(item, container_id, container_name, status_text)
     end
 
     def marked
@@ -307,10 +330,9 @@ class ItemMatcher
                     exit
                 end
 
-                # @item_statuses[item.id] = ItemMatcher.status_from_text($6)
                 add_item(
                     GameObj.new($2.dup, $3.dup, $4.dup, $1.dup, $5.dup),
-                    container_id, container_name, $6
+                    container_id, container_name, $6 || ''
                 )
             end
         end
@@ -334,7 +356,7 @@ class ItemMatcher
                 end
                 add_item(
                     GameObj.new($3.dup, $4.dup, $5.dup, $2.dup, $6.dup),
-                    container_id, container_name, $7
+                    container_id, container_name, ($7 || '')
                 )
             else
                 next
@@ -356,7 +378,7 @@ class ItemMatcher
     def _status_from_inventory(command)
         _get_inventory(command).each do |line|
             next unless line =~ INVFULL_PATTERN
-            @item_statuses[$3] = ItemMatcher.status_from_text($7)
+            @item_statuses[$3] = ItemMatcher.status_from_text($7 || '')
         end
     end
 
@@ -546,7 +568,7 @@ class ItemMatcher
             end
 
             # Sort
-            contents.sort_by!{|x| x.full_name.gsub(/^(a|an|some|the)\s+/, '')} if @sorted
+            contents.sort_by!{|x| x.full_name.gsub(/^(a|an|some|the)\s+/, '').downcase} if @sorted
 
             # Reverse
             contents.reverse! if @reversed
@@ -584,11 +606,191 @@ class ItemMatcher
 end
 
 
+class DummyStatusUpdater
+    def status_until(status, cond=true, immediate: false, &block)
+        block.call
+    end
+
+    def set(*a, **kw)
+        # Dummy
+    end
+end
+
+class StatusUpdater
+    def initialize(script, level=1)
+        @script = script
+        @level = level
+        @id = "quick-foreach-#{@level}"
+        if @level > 1
+            @title = "Foreach[#{@level}]: "
+            @previous_quickbar = "quick-foreach-#{@level-1}"
+        else
+            @title = "Foreach: "
+            @previous_quickbar = 'quick'
+        end
+
+        @unpaused_status = 'Running'
+
+        root = REXML::Element.new("openDialog")
+        root.attributes['id'] = @id
+        root.attributes['location'] = 'quickBar'
+        root.attributes['title'] = 'foreach'
+        @xml_root = root
+
+        @xml_data = data = root.add_element(
+            "dialogData",
+            {
+                'id' => @id,
+                'clear' => true
+            })
+        data.add_element('label', {'id' => "foreachLabel-#{@level}", 'value' => @title})
+
+        @xml_status = data.add_element('label', {'id' => "foreachStatusLabel-#{@level}", 'value' => @unpaused_status})
+
+        data.add_element("sep")
+
+        data.add_element("link", {
+            'id' => "foreachKill-#{@level}",
+            'value' => "stop",
+            'cmd' => "#{$lich_char}kill #{@script.name}"
+        })
+
+        data.add_element("sep")
+        @xml_pause = data.add_element("link", {'id' => "foreachPauseResume-#{@level}" })
+
+        data.add_element("sep")
+        @xml_item = data.add_element("sep", {'id' => "foreachItemData-#{@level}"})
+
+        @xml = nil
+
+        @last_was_paused = @script.paused?
+
+        @watchdog_thread = nil
+        @updater_thread = nil
+
+        @hook_name = nil
+        before_dying { cleanup }
+    end
+
+    def cleanup
+        UpstreamHook.remove(@hook_name) if @hook_name
+        @watchdog_thread.kill if @watchdog_thread
+        @updater_thread.kill if @updater_thread
+        @watchdog_thread = @updater_thread = nil
+
+        if @xml
+            puts "<switchQuickBar id=\"#{@previous_quickbar}\" />"
+            puts "<closeDialog id=\"#{@id}\" />"
+        end
+    end
+
+    def set_hook
+        now = Time.now
+        @hook_name = "Foreach/QB::#{now.tv_sec}.#{now.tv_usec}-#{Random.rand(10000)}"
+        UpstreamHook.add(@hook_name, proc{|line|
+            next line unless line =~ /<c>_qlink change (.*)$/
+            qb = $1
+            if qb == @id
+                puts "<switchQuickBar id=\"#{@id}\"/>"
+                next nil
+            elsif qb =~ /^quick-foreach-(\d+)$/
+                level = $1.to_i
+                next if level > @level
+            end
+            @previous_quickbar = qb
+            next line
+        })
+    end
+
+    def start_watchdog
+        return if @watchdog_thread
+        paused = @script.paused
+        @watchdog_thread = Thread.new {
+            while true
+                sleep 0.25
+                new_paused = @script.paused?
+                if new_paused != paused
+                    paused = new_paused
+                    set
+                    # @updater_thread.wakeup if @updater_thread
+                end
+            end
+        }
+    end
+
+    def start_monitor
+        return if @updater_thread
+        last_xml = @xml
+        @updater_thread = Thread.new {
+            while true
+                sleep 2
+                xml = @xml
+                unless  xml == last_xml
+                    last_xml = xml
+                    _respond xml
+                end
+            end
+        }
+    end
+
+    def set(status: nil, item: nil, items_processed: nil, items_total: nil, percent: nil, immediate: false)
+        @unpaused_status = status if status
+        is_paused = @script.paused || status == 'Paused'
+        if is_paused
+            status = 'Paused'
+        else
+            status = @unpaused_status
+        end
+
+        @xml_status.attributes['value'] = status if status
+
+        a = @xml_pause.attributes
+        if is_paused
+            a['value'] = "resume"
+            a['cmd'] = "#{$lich_char}unpause #{@script.name}"
+        else
+            a['value'] = "pause"
+            a['cmd'] = "#{$lich_char}pause #{@script.name}"
+        end
+
+        if item
+            type = item.type
+            type = '(no type)' if type == '' || type.nil?
+            @xml_item.attributes['value'] = "[#{items_processed+1}/#{items_total}] (#{percent}%) ##{item.id} \"#{item.full_name}\" (#{type})"
+        end
+
+        new_xml = @xml_data.to_s
+        return if new_xml == @xml
+        first_run = @xml.nil?
+        @xml = new_xml
+
+        if first_run
+            puts "#{@xml_root.to_s}<switchQuickBar id=\"#{@id}\" />"
+
+            set_hook
+            start_watchdog
+            start_monitor
+        elsif (is_paused != @last_was_paused) || immediate
+            last_was_paused = is_paused
+            @updater_thread.wakeup  # End sleep early to force an immediate update if our paused status changed.
+        end
+    end
+
+    def status_until(status, cond=true, &block)
+        set(status: status) if cond
+        block.call
+        set(status: 'Running') if cond
+    end
+end
+
+
 module ForeachScript
-    VERSION = '0.10 (2019-06-10)'
-    VERSION_INT = 10_000
+    VERSION = '0.10.3 (2019-06-13)'
+    VERSION_INT = 10_003
     CONFIG_VERSION = 2
-    FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+(in|on|under|behind)\s+)|(in|on|under|behind)\s+)(.+)$/
+    # FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+(in|on|under|behind)\s+)|(in|on|under|behind)\s+)(.+)$/
+    FILTER_PATTERN = /^(?:(in|on|under|behind)|(?:(?:(.+)=)?(.+?)\s+(in|on|under|behind)))\s+(.+)$/
+
     # INV_PATTERN = /(?:(?:Peering into|In|On|Under|Behind) .* <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>,? you see )|(?:[OI]n the <a exist="(-?\d+)"[^>]*>([^<]*)<\/a>:\s*$)|(There is nothing (?:in|on|under|behind) the|That is closed.|I could not find what you were referring to\.)/
     HOOK = 'foreach_script_temp_hook'
     HELP_URL = "https://github.com/dewiniaid/gs4-lich-scripts/blob/master/Foreach.md"
@@ -618,6 +820,14 @@ module ForeachScript
         _respond msg
     end
 
+    def self.zput(what, fast)
+        if fast
+            put what
+        else
+            fput what
+        end
+    end
+
     def self.anon_hook(prefix = '')
         now = Time.now
         "Foreach::#{prefix}-#{now.tv_sec}.#{now.tv_usec}-#{Random.rand(10000)}"
@@ -627,11 +837,6 @@ module ForeachScript
         [DownstreamHook, UpstreamHook].each{|provider|
             provider.list.find_all{|name| name.start_with?('Foreach::')}.each{|name| provider.remove(name)}
         }
-        if @stormfront && @quickbar_elements
-            # put "_qlink change #{@quickbar_id}"
-            _respond "<switchQuickBar id=\"#{@quickbar_id}\" />"
-            _respond "<closeDialog id=\"quick-foreach\" />"
-        end
     end
 
     def self.send_formatted(msg, mono=true)
@@ -871,6 +1076,35 @@ module ForeachScript
                 "  * Legacy premium locker searching now looks ON armor stands and weapon racks rather than IN them.",
                 "    (This only triggers if LOCKER MANIFEST fails for some reason, and only on premium lockers.)",
             ],
+            10_001 => [
+                "Version 0.10.1 changes:",
+                '',
+                "  * Fix filters for marked/unmarked/registered/unregistered not working in some cases.",
+            ],
+            10_002 => [
+                "Version 0.10.2 changes:",
+                '',
+                "  * Sorting is now case-insensitive.",
+                "  * Read, Look, Analyze and Inspect now add an implicit 'item' if needed.",
+                "  * Giveitem now searches for a matching PC in the room at startup and autocompletes to that PC's full name.",
+                "    - It will error out immediately if no matching PCs are found or more than one matching PC is found.",
+                "    - It will no longer fail when you do not type the character's name entirely with proper capitalization.",
+                "  * Unspported: Commands can be prefixed with a '!' to ignore various checks on usability in favor of speed.",
+                "      Use at your own risk!",
+            ],
+            10_003 => [
+                "Version 0.10.3 changes:",
+                '',
+                "  * Overhauled Stormfront status bar updates.  They should no longer significantly slow down the script.",
+                "    Additionally, status bar updates are less frequent (except when they are the result of the script pausing or resuming)",
+                '',
+                "  * Running ;foreach while ;foreach is already running (i.e. with ;force) no longer clobbers the statusbar in Stormfront.",
+                '',
+                "  * Immediate !commands now delay every 5 consecutive immediate commands rather than on every fifth item.",
+                '',
+                "  * `;foreach ... in backpack on table` should now work correctly.",
+                "    Note that a quirk in GS4's item parsing code means you will frequently need to use 'get item in container' syntax when using foreach in this way.",
+            ]
         }
 
         if prev != VERSION_INT
@@ -890,6 +1124,7 @@ module ForeachScript
             msg << "To enable automatic updates:   <d>#{$lich_char}repo set-updatable #{@script.name}</d>`."
             msg << "For details on new features:   <d>#{$lich_char}#{@script.name} help</d>"
             msg << "                   or visit:   #{HELP_URL}"
+            msg << "For more LostRanger scripts:   https://bit.ly/lostranger-scripts"
             msg << '<output class="" />'
             msg << ''
             msg << "This message will only be displayed once unless a new version is downloaded."
@@ -1013,6 +1248,10 @@ module ForeachScript
         end
         msg << HELP_URL
         msg << ''
+        if full
+            msg << "**For information on other scripts by LostRanger, visit:**"
+            msg << "https://bitly.com/lostranger-scripts"
+        end
 
         return send_help_formatted(msg.join("\n"))
     end
@@ -1143,7 +1382,7 @@ module ForeachScript
 
         case attr
         when 'type', 't'
-            if value =~ /^none$/i
+            if value =~ /^none|unknown$/i
                 return proc {|item| item.type == '' or item.type.nil?}
             end
             unless GameObj.type_data.find{|k, v| k.split(',').find{|t| t =~ pattern}}
@@ -1163,17 +1402,11 @@ module ForeachScript
         end
     end
 
-    def self.wait_block(message, target, valueproc)
+    def self.wait_block(message, target, valueproc, statusbar)
         if valueproc.call < target
             echo message
-            self.status_until(message){ wait_until { valueproc.call >= target } }
+            statusbar.status_until(message, immediate: true){ wait_until { valueproc.call >= target } }
         end
-    end
-
-    def self.status_until(status, cond=true, &block)
-        qb_refresh(status: status) if cond
-        block.call
-        qb_refresh(status: "Running") if cond
     end
 
     def self.is_premium_locker?
@@ -1215,14 +1448,7 @@ module ForeachScript
         @script = script
         @script.want_downstream = false
         @script.want_downstream_xml = true
-
-        @quickbar_id = 'quick'
-        @quickbar_status = nil
-        @quickbar_elements = nil
-        @quickbar_previous = nil
-
-        options = {}
-        extended_data = nil
+        @script_was_paused = false
 
         self.first_time_setup(@script.vars[0] =~ /^\s*setup\s*$/i ? true : false)
         self.show_changelog
@@ -1319,9 +1545,9 @@ module ForeachScript
             exit
         end
 
-        filter_attr = ($1.downcase or 'type')
-        filter_value = $2
-        position = ($3 or $4)
+        filter_attr = ($2.downcase or 'type')
+        filter_value = $3
+        position = ($1 or $4)
         targets = $5
         explicit_all = false  # Safety bypass.
 
@@ -1348,6 +1574,11 @@ module ForeachScript
             next_is_script = false
             new_commands = []
             commands.each_with_index{|command, ix|
+                prefix = ''
+                if command[0] == '!'
+                    prefix = '!'
+                    command = command[1..-1]
+                end
                 if command == ''  # Blank.
                     # Due to the split, a Lich script will appear as a blank command followed by the script invocation
                     # as the next command -- if the separator and $lich_char are the same.  Flag this for the next run
@@ -1359,23 +1590,48 @@ module ForeachScript
                 if next_is_script
                     next_is_script = false
                     # Convert to script invocation
-                    command = "#{$lich_char}#{command}"
-                else
-                    command =~ /^(\w+)(.*)$/
-                    # Autocomplete command to simplify coding in other shortcuts
-                    first_word = $1.downcase
-                    rest = $2
-                    if first_word
-                        %w(dr|op plac|e sel|l ap|praise reg|ister ge|t tak|e).each{|verb|
-                            if self.autocompletes_to(first_word, verb)
-                                command = verb.gsub('|', '') + rest
-                                break
-                            end
-                        }
+                    new_commands << "#{prefix}#{$lich_char}#{command}"
+                    next
+                end
+
+                command =~ /^(\w+)(.*)$/
+                # Autocomplete command to simplify coding in other shortcuts
+                first_word = $1.downcase
+                rest = $2
+                if first_word
+                    %w(dr|op plac|e sel|l ap|praise reg|ister ge|t tak|e r|ead l|ook ana|lyze ins|pect).each{|verb|
+                        if self.autocompletes_to(first_word, verb)
+                            command = verb.gsub('|', '') + rest
+                            break
+                        end
+                    }
+                end
+
+                if first_word == 'giveitem'
+                    who = rest.strip.capitalize
+                    if who == ''
+                        echo "GIVEITEM requires a target character."
+                        exit
+                    end
+                    if GameObj.pcs.find{|x| x.noun == who}
+                        command = "giveitem #{who}"
+                        next
+                    else
+                        matches = GameObj.pcs.find_all{|x| x.noun.start_with?(who)}
+                        if matches.length == 0
+                            echo "GIVEITEM: No PCs found matching '#{who}'."
+                            exit
+                        elsif matches.length > 1
+                            echo "GIVEITEM: Multiple PCs found matching '#{who}': #{matches.map{|x| x.noun}.join(', ')}."
+                            exit
+                        else
+                            who = matches[0].noun
+                            command = "giveitem #{who}"
+                        end
                     end
                 end
 
-                if command =~ /^(drop|place|sell|appraise|stash|register|mark|unmark|get|take)$/i
+                if command =~ /^(drop|place|sell|appraise|stash|register|mark|unmark|get|take|read|look|analyze|inspect)$/i
                     # Add implicit ITEM if no modifiers.
                     command = "#{$1} item"
                 end
@@ -1394,9 +1650,9 @@ module ForeachScript
                         command = '_drag item drop'
                     elsif command =~ /^(?:giveitem)|(?:place|sell|(appraise|register|mark|unmark))\s+item$/i
                         implicit_return = $1 && (count == 1)
-                        new_commands << '_remget item'  # Hackery
-                        new_commands << command
-                        new_commands << "return" if implicit_return
+                        new_commands << prefix + '_remget item'  # Hackery
+                        new_commands << prefix + command
+                        new_commands << prefix + "return" if implicit_return
                         next
                         #
                         #
@@ -1412,13 +1668,14 @@ module ForeachScript
                         # end
                     end
                 end
-                new_commands << command
+                new_commands << prefix + command
                 # if commands.length == 1 and command =~ /^app(?:raise)?\s+item$/i
                 #     new_commands << 'return'
                 # end
             }
             commands = new_commands
         end
+        commands = nil if commands and commands.length == 0
 
         # Find possible item IDs
         silence_me if $SAFE == 0
@@ -1438,7 +1695,7 @@ module ForeachScript
                 next if seen_inv
                 seen_inv = true
                 # Sanity check
-                if commands.length > 0 and filter_value.nil?
+                if commands and filter_value.nil?
                     echo 'WARNING: THIS COMMAND WILL ACT ON EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
                     if explicit_all
                         echo "'#{$lich_char}kill #{@script.name}' to abort!"
@@ -1510,28 +1767,43 @@ module ForeachScript
 
         @previous_matcher = matcher
 
+        statusbar = nil
+        if @stormfront && commands
+            @running_instances ||= 0
+            begin
+                statusbar = StatusUpdater.new(script, @running_instances += 1)
+                before_dying { @running_instances -= 1 }
+            rescue
+                @running_instances -= 1
+                exit
+            end
+        else
+            statusbar = DummyStatusUpdater.new
+        end
+
         before_next = nil  # Possibly skippable things to do before the next command.
         move_container_cache = {}  # Ids of discovered containers
         processed_items = 0
+        immediate = nil
         matcher.container_contents.each{|container, items|
             container_name = matcher.container_names[container]
             # next unless items.length > 0
             # items = items.find_all{|item| filter.call(item)}
             # next unless items.length > 0
-            if commands.length > 0
+            if commands
                 items.each{|item|
                     ref = "##{item.id}"
                     percent = (100.0 * processed_items / total_items).to_i
                     if processed_items % ITEM_UPDATE_INTERVAL == 0
                         echo "Item #{processed_items + 1} of #{total_items}.  (#{percent}% complete)"
                     end
-                    qb_refresh(
+                    statusbar.set(
                         status: "Running",
                         item: item,
                         items_processed: processed_items,
                         items_total: total_items,
                         percent: percent
-                    )
+                    ) if statusbar
 
                     commands.each_with_index{|original, ix|
                         command = (
@@ -1541,6 +1813,17 @@ module ForeachScript
                             .gsub(/\bname\b/i, item.name)
                             .gsub(/\bcontainer\b/i, ("##{container}"))
                         )
+
+                        if command[0] == '!'
+                            command = command[1..-1]
+                            immediate ||= 0
+                            immediate += 1
+                            if immediate > 5
+                                immediate = nil
+                            end
+                        else
+                            immediate = nil
+                        end
 
                         if command =~ /^_remget (.*)/
                             if container == '_worn'
@@ -1556,7 +1839,7 @@ module ForeachScript
                             scriptname, args = command.split(/\s+/, 2)
                             scriptname = scriptname[1..-1]
                             echo "Running #{$lich_char}#{scriptname} #{args}"
-                            status_until("Waiting on #{$lich_char}#{scriptname}"){ Script.run(scriptname, args) }
+                            statusbar.status_until("Waiting on #{$lich_char}#{scriptname}"){ Script.run(scriptname, args) }
                         elsif command =~ COMMAND_PATTERNS[:move]
                             before_next.call if before_next
                             before_next = nil
@@ -1567,15 +1850,15 @@ module ForeachScript
                             floor = (where =~ /^(?:ground|floor)$/i) ? true : false
                             if what[0] == '#'
                                 if floor
-                                    fput "_drag #{what} drop"
-                                    waitfor '<right>Empty', '<left>Empty'
+                                    zput("_drag #{what} drop", immediate)
+                                    waitfor '<right>Empty', '<left>Empty' unless immediate
                                     next
                                 end
                                 open_locker if where =~ /^locker$/i  # Convenience
                                 where = move_container_cache[where] if move_container_cache[where]
                                 if where[0] == '#'
-                                    fput "_drag #{what} #{where}"
-                                    waitfor '<right>Empty', '<left>Empty'
+                                    zput("_drag #{what} #{where}", immediate)
+                                    waitfor '<right>Empty', '<left>Empty' unless immediate
                                     next
                                 end
                             end
@@ -1583,17 +1866,9 @@ module ForeachScript
                             put_command = floor ? "place #{what}" : "put #{what} in #{where}"
 
                             unless holding
-                                if fast
-                                    put get_command
-                                else
-                                    fput get_command
-                                end
+                                zput(get_command, fast || immediate)
                             end
-                            if fast
-                                put put_command
-                            else
-                                fput put_command
-                            end
+                            zput(put_command, fast || immediate)
                             waitfor '<right>', '<left>'
                             next if floor
 
@@ -1605,22 +1880,22 @@ module ForeachScript
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} mana", n, proc { XMLData.mana })
+                            self.wait_block("Waiting for #{n} mana", n, proc { XMLData.mana }, statusbar)
                         elsif command =~ /^wait(?:health|hp) (-?\d+)$/
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} HP", n, proc { XMLData.health })
+                            self.wait_block("Waiting for #{n} HP", n, proc { XMLData.health }, statusbar)
                         elsif command =~ /^wait(?:spirit|sp) (-?\d+)$/
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} spirit", n, proc { XMLData.spirit })
+                            self.wait_block("Waiting for #{n} spirit", n, proc { XMLData.spirit }, statusbar)
                         elsif command =~ /^wait(?:stamina|st) (-?\d+)$/
                             before_next.call if before_next
                             before_next = nil
                             n = $1.to_i
-                            self.wait_block("Waiting for #{n} stamina", n, proc { XMLData.stamina })
+                            self.wait_block("Waiting for #{n} stamina", n, proc { XMLData.stamina }, statusbar)
                         elsif command =~ /^stash (.*$)/i
                             before_next.call if before_next
                             before_next = nil
@@ -1631,13 +1906,14 @@ module ForeachScript
                                 next unless GameObj.inv.find{|x| x.id == sack.id}
                                 where = "##{sack.id}"
                                 if what[0] == '#' and ix == 0
-                                    fput "_drag #{what} #{where}"
+                                    zput("_drag #{what} #{where}", immediate)
                                 else
-                                    fput "get #{what}" if ix == 0
+                                    zput("get #{what}", immediate) if ix == 0
+                                    immediate = false
                                     fput "put #{what} in #{where}"
                                 end
-                                nil until get =~ /^Your .* won't fit in .*|<(left|right)>Empty</
-                                waitfor '<prompt'
+                                nil until get =~ /^Your .* won't fit in .*|<(left|right)>Empty</ unless immediate
+                                waitfor '<prompt' unless immediate
                                 if $1
                                     success = true
                                     break
@@ -1654,20 +1930,20 @@ module ForeachScript
                             echo $1
                         elsif command =~ /^waitrt$/i
                             before_next = nil
-                            status_until("Waiting for RT"){waitrt}
+                            statusbar.status_until("Waiting for RT"){waitrt}
                         elsif command =~ /^waitrt\?$/i
                             before_next = nil
-                            status_until("Waiting for RT", checkrt > 0){waitrt?}
+                            statusbar.status_until("Waiting for RT", checkrt > 0){waitrt?}
                         elsif command =~ /^waitcastrt$/i
                             before_next = nil
-                            status_until("Waiting for Cast RT"){waitcastrt}
+                            statusbar.status_until("Waiting for Cast RT"){waitcastrt}
                         elsif command =~ /^waitcastrt\?$/i
                             before_next = nil
-                            status_until("Waiting for Cast RT", checkcastrt){waitcastrt?}
+                            statusbar.status_until("Waiting for Cast RT", checkcastrt){waitcastrt?}
                         elsif command =~ /^waitfor (.*)$/i
                             script.want_downstream = true
                             script.want_downstream_xml = false
-                            status_until("Waiting"){waitfor $1}
+                            statusbar.status_until("Waiting"){waitfor $1}
                             waitfor $1
                             script.want_downstream_xml = true
                             script.want_downstream = false
@@ -1680,7 +1956,7 @@ module ForeachScript
                                 flags = $2 unless $2 == ''
                             end
                             pattern = Regexp::new(text, flags)
-                            status_until("Waiting"){ nil until get =~ pattern }
+                            statusbar.status_until("Waiting"){ nil until get =~ pattern }
                             before_next = proc { status_until("Waiting for RT", checkrt > 0){waitrt?} }
                         elsif command =~ /^pause$/i
                             percent = (100.0 * processed_items / total_items).to_i
@@ -1689,7 +1965,7 @@ module ForeachScript
                             msg << "[#{@script.name}: Pausing at #{self.item_detail(item)},  (#{processed_items + 1} of #{total_items}, #{percent}% complete)."
                             msg << '<output class="" />' if $stormfront
                             puts msg.join("\n")
-                            status_until("Paused"){ pause_script }
+                            statusbar.status_until("Paused"){ pause_script }
                             before_next = proc { waitrt? }
                         elsif command =~ /^giveitem(?:\s+(?:to\s+)?(.+))?$/i
                             before_next.call if before_next
@@ -1698,34 +1974,28 @@ module ForeachScript
                                 echo 'Give to whom?'
                                 exit
                             end
-                            fput "give ##{item.id} to #{$1}"
-                            script.want_downstream = true
-                            script.want_downstream_xml = false
-                            status_until("Waiting for accept"){ waitfor /^#{$1} has accepted your offer/ }
-                            script.want_downstream_xml = true
-                            script.want_downstream = false
+                            zput("give ##{item.id} to #{$1}", immediate)
+                            statusbar.status_until("Waiting for #{$1}"){ waitfor /^#{$1}<\/a> has accepted your offer/ }
                         elsif command =~ /^return(?:\s+item)?$/i
                             before_next.call if before_next
                             before_next = nil
                             if container == '_worn'
-                                fput "wear #{ref}"
+                                zput("wear #{ref}", immediate)
                             elsif container == '_ground'
-                                fput "place #{ref}"
+                                zput("place #{ref}", immediate)
                             else
-                                fput "put #{ref} in ##{container}"
+                                zput("put #{ref} in ##{container}", immediate)
                             end
-                            #     waitfor '<right>', '<left>'  # Wait for a hand change.
-                            # end
                         elsif command =~ /^sleep (\d*\.?\d+)$/i
-                            status_until("Sleeping") { sleep $1.to_f }
+                            statusbar.status_until("Sleeping") { sleep $1.to_f }
                         elsif command =~ /^unmark\s+(.*)/i
                             before_next.call if before_next
                             before_next = nil
                             fput "mark #{$1} remove"
                         else
                             before_next.call if before_next
-                            fput command
-                            before_next = proc { waitfor '<prompt'; status_until("Waiting for RT", checkrt > 0){waitrt?} }
+                            zput(command, immediate)
+                            before_next = proc { waitfor '<prompt'; statusbar.status_until("Waiting for RT", checkrt > 0){waitrt?} } unless immediate
                         end
                     }
                     processed_items += 1
@@ -1761,107 +2031,6 @@ module ForeachScript
             return REXML::Text.new(text).to_s if @profanity
             return text
         end
-    end
-
-    def self.qb_hook
-        return unless @stormfront
-        UpstreamHook.add(self.anon_hook, proc{|line|
-            if line =~ /<c>_qlink change (.*)$/
-                if $1 == 'quick-foreach'
-                    puts '<switchQuickBar id="quick-foreach"/>'
-                    next nil
-                else
-                    @quickbar_id = $1
-                end
-            end
-            line
-        })
-    end
-
-    def self.qb_refresh(status: nil, item: nil, items_processed: nil, items_total: nil, percent: nil)
-        return unless @stormfront
-
-        unless @quickbar_elements
-            @quickbar_elements = {}
-            root = REXML::Element.new("openDialog")
-            root.attributes['id'] = "quick-foreach"
-            root.attributes['location'] = 'quickBar'
-            root.attributes['title'] = 'foreach'
-            @quickbar_elements[:root] = root
-            echo @quickbar_elements[:root].inspect
-
-            @quickbar_elements[:data] = data = root.add_element(
-                "dialogData",
-                {
-                    'id' => 'quick-foreach',
-                    'clear' => true
-                })
-            data.add_element('label', {'id' => 'foreachLabel', 'value' => 'Foreach: '})
-
-            @quickbar_elements[:status] = data.add_element('label', {'id' => 'foreachStatusLabel', 'value' => 'Running'})
-
-            data.add_element("sep")
-
-            data.add_element("link", {
-                'id' => "foreachKill",
-                'value' => "stop",
-                'cmd' => "#{$lich_char}kill #{@script.name}"
-            })
-
-            data.add_element("sep")
-
-            @quickbar_elements[:pause] = data.add_element("link", {'id' => "foreachPauseResume" })
-
-            data.add_element("sep")
-
-            @quickbar_elements[:item] = data.add_element("sep", {'id' => "foreachItemData"})
-
-            # Start 'are we paused?' watchdog.
-            paused = @script.paused?
-            watchdog = Thread.new {
-                while true
-                    sleep 0.25
-                    new_paused = @script.paused?
-                    if new_paused != paused
-                        paused = new_paused
-                        qb_refresh
-                    end
-                end
-            }
-            before_dying { watchdog.kill }
-        end
-
-        @quickbar_status = status if status
-        if @script.paused?
-            status = 'Paused'
-        else
-            status = @quickbar_status
-        end
-        @quickbar_elements[:status].attributes['value'] = status
-
-        a = @quickbar_elements[:pause].attributes
-        if status == 'Paused'
-            a['value'] = "resume"
-            a['cmd'] = "#{$lich_char}unpause #{@script.name}"
-        else
-            a['value'] = "pause"
-            a['cmd'] = "#{$lich_char}pause #{@script.name}"
-        end
-
-        if item
-            type = item.type
-            type = '(no type)' if type == '' || type.nil?
-            @quickbar_elements[:item].attributes['value'] = "[#{items_processed+1}/#{items_total}] (#{percent}%) ##{item.id} \"#{item.full_name}\" (#{type})"
-        end
-
-        xml = @quickbar_elements[:data].to_s
-        return if @quickbar_previous == xml
-        if @quickbar_previous
-            puts xml
-        else
-            puts "#{@quickbar_elements[:root].to_s}<switchQuickBar id=\"quick-foreach\" />"
-        end
-        @quickbar_previous = xml
     end
 end
 
