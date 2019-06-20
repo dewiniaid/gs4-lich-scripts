@@ -25,9 +25,15 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.10.3 (2019-06-13)
+  version: 0.10.4 (2019-06-20)
 
   changelog:
+    version 0.10.4 (2019-06-20)
+      * Made multiple fixes to 'giveitem'.  It should actually be recognized as a command again.
+      * Added a new 'fastinv'/'qinv' target, which is similar to 'inv' but skips the INV FULL step.  This allows for
+        slightly faster startup at the cost of being unable to check marked/registered status and being potentially
+        unaware of the contents of containers that you have not previously LOOKed in.
+
     version 0.10.3 (2019-06-13)
       * Overhauled Stormfront status bar updates.  They should no longer significantly slow down the script.
         Additionally, status bar updates are less frequent (except when they are the result of the script pausing
@@ -785,8 +791,8 @@ end
 
 
 module ForeachScript
-    VERSION = '0.10.3 (2019-06-13)'
-    VERSION_INT = 10_003
+    VERSION = '0.10.4 (2019-06-20)'
+    VERSION_INT = 10_004
     CONFIG_VERSION = 2
     # FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+(in|on|under|behind)\s+)|(in|on|under|behind)\s+)(.+)$/
     FILTER_PATTERN = /^(?:(in|on|under|behind)|(?:(?:(.+)=)?(.+?)\s+(in|on|under|behind)))\s+(.+)$/
@@ -1104,7 +1110,15 @@ module ForeachScript
                 '',
                 "  * `;foreach ... in backpack on table` should now work correctly.",
                 "    Note that a quirk in GS4's item parsing code means you will frequently need to use 'get item in container' syntax when using foreach in this way.",
-            ]
+            ],
+            10_004 => [
+                "Version 0.10.4 changes:",
+                '',
+                "  * Made multiple fixes to 'giveitem'.  It should actually be recognized as a command again.",
+                '',
+                "  * Added a new `fastinv`/`qinv` target.",
+                "    This is similar to `inv`, but skips the INV FULL step.  This allows for slightly faster startup but with some caveats.  For details, see the documentation.",
+            ],
         }
 
         if prev != VERSION_INT
@@ -1183,6 +1197,7 @@ module ForeachScript
             msg << "    `LOOT`              - Contents of items in the room.  (e.g. contents of open boxes on the ground)"
             msg << "    `LOCKER`            - Contents of your locker (including premium locker containers)."
             msg << "    `PREVIOUS` or `LAST`  - All items that matched the previous run of Foreach."
+            msg << "    `FASTINV` or `QINV`   - Like INV, but using only loaded inventory data without an INV FULL.  See documentation for caveats and full details."
             msg << ''
             msg << "Each **command** will be executed on the item in sequence.  Within each command, the following replacements will be be made:"
             msg << "    `ITEM`      - An exact reference to the item, i.e. it's item number."
@@ -1615,7 +1630,6 @@ module ForeachScript
                     end
                     if GameObj.pcs.find{|x| x.noun == who}
                         command = "giveitem #{who}"
-                        next
                     else
                         matches = GameObj.pcs.find_all{|x| x.noun.start_with?(who)}
                         if matches.length == 0
@@ -1691,6 +1705,11 @@ module ForeachScript
                 open_locker
             end
 
+            if target =~ /^(?:fast|q)inv(?:entory)?$/i and matcher.status_filter != 0
+                echo "Filtering by status requires a regular inventory view, changing '#{target}' to 'inv'"
+                target = "inv"
+            end
+
             if target =~ /^inv(?:entory)?$/i  # Entire inventory
                 next if seen_inv
                 seen_inv = true
@@ -1707,8 +1726,26 @@ module ForeachScript
                         exit
                     end
                 end
-
                 matcher.ingest_inventory
+            elsif target =~ /^(?:fast|q)inv(?:entory)?$/i
+                # Sanity check
+                if commands and filter_value.nil?
+                    echo 'WARNING: THIS COMMAND WILL ACT ON EVERY ITEM THAT YOU HAVE IN YOUR ENTIRE INVENTORY!'
+                    if explicit_all
+                        echo "'#{$lich_char}kill #{@script.name}' to abort!"
+                        sleep 1  # A moment before it all scrolls off
+                        # echo "'#{$lich_char}unpause #{@script.name}' to continue, or '#{$lich_char}kill #{@script.name}' to abort"
+                        # pause_script
+                    else
+                        echo "If you REALLY want to do this, you must explicitly say so by using '#{$lich_char}#{@script.name} ALL in #{target}';..."
+                        exit
+                    end
+                end
+                GameObj.inv.each{|item|
+                    if (items = GameObj.containers[item.id])
+                        matcher.ingest_container(item.id, item.full_name, items)
+                    end
+                }
             elsif target =~ /^(?:prev(?:ious)?|last)$/i  # Previous run
                 unless @previous_matcher
                     echo "No previous run data is available."
@@ -1975,7 +2012,7 @@ module ForeachScript
                                 exit
                             end
                             zput("give ##{item.id} to #{$1}", immediate)
-                            statusbar.status_until("Waiting for #{$1}"){ waitfor /^#{$1}<\/a> has accepted your offer/ }
+                            statusbar.status_until("Waiting for #{$1}"){ waitforre /#{$1}<\/a> has accepted your offer/ }
                         elsif command =~ /^return(?:\s+item)?$/i
                             before_next.call if before_next
                             before_next = nil

@@ -1,4 +1,4 @@
-# Foreach 0.10
+# Foreach 0.10.4
 
 *Stop the up-up-up-enter!*
 
@@ -39,8 +39,9 @@ While not a full replacement for "proper" purpose-built Lich scripts, it is stil
   `;foreach first 7 name=uncut diamond in inv;get item;sell item`
 
 * Doing a long task and want to be able to resume it later (possibly on the same source container?)  
-  `;foreach unmarked gem in whereever;get item;do lots of things;mark item;return`, followed by  
-  `;foreach marked gem in whereever;get item;mark item remove`
+  `;foreach unmarked gem in whereever;get item;do lots of things;mark item;return` as many times as needed, followed by  
+  `;foreach marked gem in whereever;get item;unmark item`  
+  (`whereever` must be a container in your inventory or your entire `inv`)
      
 ## That's nice.  But what can it REALLY do?
 
@@ -120,7 +121,7 @@ _targets_ tells ;foreach where you want to look for the items.  You can specify 
 Each target can be the name of an actual container in game ("cloak", "my backpack", etc.), or one of the following options:
 
 * **inv** or **inventory**  
-  Examines the contents all containers in your inventory.
+  Examines the contents all containers in your inventory.  Note that containers in your hands are not in your inventory.
   
 * **floor** or **ground** or **room**  
   Examines items on the ground.  *The items, not their contents*
@@ -140,7 +141,17 @@ Each target can be the name of an actual container in game ("cloak", "my backpac
   manage to flub something up, like accidentally moving all of your inventory to your locker rather than just your boxes.
   
   When using **last**, the container items are reported in will be the container they started the previous run in -- not
-  their current location.
+  their current location.  So `;foreach in last;move to container` will move all (reachable) items to their original
+  locations.
+  
+* **fastinv** or **qinv**  
+  Similar to **inv**, but this uses container contents as currently known by Lich rather than doing an INV FULL.  This 
+  allows for faster startup, but with two caveats:
+  - Item registration/marked status is unavailable.  (If you're using one of the relevant _options_, this will be
+    automatically converted to `inv`)
+  - Containers that Lich doesn't know the contents of will be skipped.  Most notably, if you have not LOOKed in a 
+    container since you have logged in, that container will be skipped.  Note that `;foreach in inv` does NOT satisfy
+    the "looked in a container" requirement, but `;foreach in worn;look in item` probably will.
   
   If you specified a _what_ (above section), it will further restrict the list of what foreach is working on.
   
@@ -296,19 +307,23 @@ Depending on the level of depth you want, either just read the bold parts, just 
 
 2. **Implicit Commands**: The command list is fixed up
    * Shortened versions of some verbs that Foreach has special handling for are expanded to their full versions.  This
-     includes shortened versions of drop, place, sell, appraise, register, get and take.
-   * If 'stash' is in the command list, a list of lootsacks is built and the script exits if it can't find any.
-   * Commands like 'place', 'sell', 'stash', 'appraise', 'mark' and 'unmark' get the word 'item' added to the end unless
-     they already have something after them.  ("sell" becomes "sell item", "sell emerald" is unchanged.)
-   * *For the first command only:* An implicit "remove item" (for worn targets) or "get item" (everything else") is added for commands that are known
-     to only work with an item in hand: giveitem, place, sell, stash, appraise, register, mark and unmark.  This only
-     applies if the command string is "get item", i.e. "get emerald" skips this check.
-   * *If there is only one command*: For commands in the above list that don't dispose of an item (appraise, register, 
-     mark, and unmark), an implicit "return" is added to the end of the list
+     includes shortened versions of `drop`, `place`, `sell`, `appraise`, `register`, `get` and `take`.
+   * If `stash` is in the command list, a list of lootsacks is built and the script exits if it can't find any.
+   * Any `giveitem` commands resolve to an exact player name in the room (and the script fails if no match is found).  
+   * Commands like `place`, `sell`, `stash`, `appraise`, `mark` and `unmark` get the word `item` added to the end unless
+     they already have something after them.  (`sell` becomes `sell item`, `sell emerald` is unchanged.)
+   * *For the first command only:* An implicit `_remget item` (for worn targets) or `get item` (everything else") is 
+     added for commands that are known to only work with an item in hand, such as `giveitem`, `place`, `sell`, `stash`, 
+     `appraise`, `register`, `mark` and `unmark`.  This only applies if the command string is `get item`, i.e. 
+     `get emerald` skips this check.
+     - `_remget` is a hidden Foreach command equivalent to "remove item if its parent container is `_worn`, otherwise 
+       get it."  
+   * *If there is only one command*: For commands in the above list that don't dispose of an item (so not `drop` or 
+     `sell`), an implicit `return` is added to the end of the list
      
 3. **Item Scanning**: Foreach builds a list of containers and items that are in them.
-   At this point, `foreach` has an empty map of container IDs to names (with a dummy `nil` container representing items 
-   on the ground), an empty map of container IDs to lists of container contents, and an empty list of containers to scan.
+   At this point, `foreach` has an empty map of container IDs to names (with fake IDs `_worn` and `_ground` for those
+   two targets), an empty map of container IDs to lists of container contents, and an empty list of containers to scan.
    Throughout this process, container names are mapped as they're discovered (mainly for the item listing mode if you
    `;foreach in ...` with no commands), some container IDs are added to the "to scan" list, and each container along
    with its items are added to the "to filter" list.  If you're filtering by status (marked/registered status, e.g. 
@@ -325,16 +340,16 @@ Depending on the level of depth you want, either just read the bold parts, just 
      some reason, `;foreach` can't determine your current location, it fails if you're filtering by status (only the
      locker manifest can show marked/registered for contents of a locker), and otherwise adds the locker containers to 
      the "to scan" queue.
-   * `floor` (and synonyms) places all the contents of the room (GameObj.loot) into the `nil` container.  Like `loot`,
-     it fails immediately if you're filtering by registration/mark status
-   * `worn` renames the ground container to "On your person", and places what you are wearing (GameObj.inv) in it.
+   * `floor` (and synonyms) places all the contents of the room (GameObj.loot) into the `_ground` container.  Like 
+     `loot`, it fails immediately if you're filtering by registration/mark status
+   * `worn` places `GameObj.inv` into the `_worn` container.
    * Anything else is treated like a single container: If you are filtering by status and your target is `locker`
      (only possible for non-premium lockers), ;foreach exits immediately with an error.  Otherwise, it LOOKs in the 
      container to get the game to send over its inventory data and determine what its ID and searches for status data
      (if needed, see the "To Scan" section)
      
    Then, if there are any containers to scan:
-   * All other scripts are paused.  (This is mainly to avoid `;sorter` spam)
+   * The `sorter` script is paused, if it is running, to avoid spam.
    * Each container is looked in (to get or refresh its inventory)
    * For each container: )
      * Its contents are added to the "to filter" list
@@ -343,6 +358,7 @@ Depending on the level of depth you want, either just read the bold parts, just 
        Otherwise, an `INV FULL` is done, followed by an `INV HANDS FULL` if the container was not found in your inventory.
        If, after all of the above, ;foreach doesn't have status data for the container (meaning it's probably not in your inventory),
        it assumes that it won't have status data for any of its contents either and exits.
+   * The `sorter` script is resumed, if it was paused.
        
 4. **Item Sorting**: If the SORTED or REVERSED options are specified, they are applied to each container inventory. 
 
@@ -377,6 +393,12 @@ Depending on the level of depth you want, either just read the bold parts, just 
        until you are out of roundtime)
 
 ## Changelog
+
+### Version 0.10.4 (2019-06-20)
+  * Made multiple fixes to 'giveitem'.  It should actually be recognized as a command again.
+  * Added a new 'fastinv'/'qinv' target, which is similar to 'inv' but skips the INV FULL step.  This allows for
+    slightly faster startup at the cost of being unable to check marked/registered status and being potentially
+    unaware of the contents of containers that you have not previously LOOKed in.
 
 ### Version 0.10.3 (2019-06-13)
   * Overhauled Stormfront status bar updates.  They should no longer significantly slow down the script.  
