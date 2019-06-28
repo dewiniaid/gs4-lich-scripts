@@ -261,6 +261,7 @@ module RecolorScript
             msg << "For a more detailed changelog: <d>#{$lich_char}repo info #{@script.name}</d>."
             msg << "To enable automatic updates:   <d>#{$lich_char}repo set-updatable #{@script.name}</d>`."
             msg << "For details on new features:   <d>#{$lich_char}#{@script.name} help</d>"
+            msg << "For more LostRanger scripts:   https://bit.ly/lostranger-scripts"
             msg << ''
             msg << "NOTE: Changes to NPC detection (such as identifying ranger companions and wizard familiars) may require a Lich restart."
             msg << ''

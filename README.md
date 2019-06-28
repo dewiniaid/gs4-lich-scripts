@@ -6,6 +6,21 @@ Note that the Lich repository is probably more up-to-date than the Github; see e
 
 `;repo list --author=LostRanger`
 
+## What's Relatively New
+(These are repeated in the other lists):
+
+**ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
+INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
+(rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
+is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
+
+**TargetID**: Assigns targettable creatures a unique 3-letter tag and allows you to target based off of that tag.
+This is intended to let you determine which creature e.g. cast a gas cloud and target accordingly, but in actuality it's
+mostly all about the amusing thing of seeing "a mammoth arachnid (WEB)" or "a rolton (RPA) while hunting. 
+
+**Recolor**: Change the colors of familiars, demons, animal companions and other friendly NPCs in room descriptions so
+you don't think there are monsters in the room.
+
 ## Noteworthy Scripts For Everyone
 
 **Foreach**: Quickly perform a series of commands to all items matching a criteria you specify, like moving all boxes 
@@ -19,6 +34,15 @@ useful organization.
 
 **Spellmerge**: Condenses the effects of certain mass spells falling off (and other similar effects) to reduce screen
 scroll.  See `;spellmerge help` for more details or `;spellmerge theory` for a detailed explanation of how it works.
+
+**ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
+INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
+(rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
+is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
+
+**TargetID**: Assigns targettable creatures a unique 3-letter tag and allows you to target based off of that tag.
+This is intended to let you determine which creature e.g. cast a gas cloud and target accordingly, but in actuality it's
+mostly all about the amusing thing of seeing "a mammoth arachnid (WEB)" or "a rolton (RPA) while hunting. 
 
 **Go2Shop**: Travel to a player shop by name.  The playershop does not need to be in the map database.
 
