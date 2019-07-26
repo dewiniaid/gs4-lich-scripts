@@ -1,0 +1,115 @@
+=begin
+  Reports versions of Lich, Ruby, and other important builtins, as well as other diagnostic information.
+
+	  author: LostRanger (thisgenericname@gmail.com)
+	  game: any
+	  tags: utility
+
+  version: 0.1 (2019-07-09)
+
+  changelog:
+    version 0.1 (2019-07-09)
+      * First release.
+=end
+
+def const_get(sym, parent: Object, missing: 'not installed')
+    return missing unless parent.const_defined?(sym)
+    return parent.const_get(sym).to_s
+end
+
+def module_version(sym)
+    begin
+        return 'not installed' unless Object.const_defined?(sym)
+        v = Object.const_get(sym)::VERSION
+        return v.join('.') if v.is_a?(Array)
+        return v.to_s
+    end
+    return 'error'
+end
+
+def format_report(report, width)
+    report.map{|k, v| "#{k.ljust(width, '.')}: #{v}" }
+end
+
+report = {
+    "Ruby version" => const_get(:RUBY_VERSION, missing: 'unknown'),
+    "Ruby platform" =>  const_get(:RUBY_PLATFORM, missing: 'unknown'),
+    "Ruby engine" => const_get(:RUBY_ENGINE, missing: 'unknown'),
+    "Lich version" => const_get(:LICH_VERSION, missing: 'unknown'),
+    "SQLite3 version" => module_version(:SQLite3),
+    "Gtk version" => module_version(:Gtk),
+    "Cairo version" => module_version(:Cairo),
+    "#{$lich_char}version Version" => "0.1"
+}
+
+msg = ["```"]
+msg += format_report(report, 20)
+msg << ''
+report = {}
+[:LICH_DIR, :SCRIPT_DIR, :DATA_DIR, :TEMP_DIR, :LOG_DIR, :MAP_DIR, :BACKUP_DIR].each do |sym|
+    report[sym.to_s] = const_get(sym, missing: 'unknown')
+end
+
+msg += format_report(report, 20)
+msg << ''
+
+
+if $SAFE == 0
+    report = {}
+
+    begin
+        fn = Dir.entries("#{DATA_DIR}/#{XMLData.game}").find_all { |filename| filename =~ /^map\-[0-9]+\.(?:dat|xml)$/ }.collect { |filename| "#{DATA_DIR}/#{XMLData.game}/#{filename}" }.sort[-1]
+        if fn
+            report["MapDB filename"] = File.basename(fn)
+            report["MapDB last modified"] = File.mtime(fn).to_s
+        else
+            report["MapDB filename"] = 'not found'
+        end
+    rescue
+        report["MapDB filename"] = 'error'
+    end
+
+    ["gameobj-data", "spell-list"].each do |file|
+        time = nil
+        [DATA_DIR, SCRIPT_DIR].each do |dir|
+            begin
+                fn = "#{dir}/#{file}.xml"
+                time = File.mtime(fn) if File.exists?(fn)
+                break
+            rescue
+                time = nil
+            end
+        end
+        time = time.to_s if time
+        time ||= 'unknown'
+        report["#{file} last modified"] = time
+    end
+    msg += format_report(report, 30)
+    msg << ''
+end
+
+
+report = {
+    "Running scripts" => Script.list.map{|x| x.name}.join(', '),
+    "Downstream hooks" => DownstreamHook.list.join(', '),
+    "Upstream hooks" => UpstreamHook.list.join(', '),
+    "Current threads" => Thread.list.length.to_s
+}
+
+msg += format_report(report, 20)
+
+
+
+
+
+
+unless $SAFE == 0
+    msg << "I can report information on some of Lich's support files if you trust this script:"
+    msg << "    #{$lich_char}trust #{script.name}"
+end
+
+msg << "```"
+
+respond msg
+
+

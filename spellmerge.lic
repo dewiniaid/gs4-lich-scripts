@@ -30,9 +30,17 @@
 	  tags: Magic, QOL
 	  required: Lich >= 4.6.0.
 
-  version: 0.4.4 (2017-07-15)
+  version: 0.5 (2017-07-19)
 
   changelog:
+    version 0.5.1 (2019-07-19)
+      * Remove inadvertently-left-in debugging code.
+
+    version 0.5 (2019-07-19)
+      * Add Song of Power falloff messaging.
+      * Add responses from SIGNAL.
+      * Don't break when no-pronoun-links is running.
+
     version 0.4.4 (2017-07-15)
       * Fix errant character that MIGHT have broken the script for everyone.  Hurray for typing in wrong window.
 
@@ -102,7 +110,8 @@
 
 
 class SpellMerge
-    VERSION = '0.4.3 (2017-07-14)'
+    VERSION = '0.5.1 (2019-07-19)'
+    VERSION_INT = 500001
 
     DEFAULT_SETTINGS = {
         'delay' =>  0.1,   # Spell merge delay, in seconds.
@@ -113,14 +122,15 @@ class SpellMerge
 
     PLAYER_PATTERN_STRING = '(<a exist="-\d+" noun="\w+\">[A-Z][a-z\']+</a>)'
     HAS_PLAYER_PATTERN = Regexp.new(PLAYER_PATTERN_STRING)  #  /(<a exist="-\d+" noun="\w+">\w+<\/a>)/
-    FLUSH_PATTERN = /<style id="roomName"|^<pushStream|^Your group status is currently |^Cast Roundtime|^Roundtime/
+    # FLUSH_PATTERN = /<style id="roomName"|^<pushStream|^Your group status is currently |^Cast Roundtime|^Roundtime/
+    FLUSH_PATTERN = /<style id="roomName"|^<pushStream|^Cast Roundtime|^Roundtime/
+    PROMPT_FLUSH_PATTERN = /<prompt|^Your group status is currently/
 
     class Effect
-        attr_reader :effect, :replacement, :pattern, :id
+        attr_reader :effect, :replacement, :pattern, :id, :prompt
         attr_accessor :deadline, :names, :lines, :next, :newline, :action
 
-
-        def initialize(id, effect, replacement=nil)
+        def initialize(id, effect, replacement=nil, prompt: false)
             @action = :merge
             @id = id.to_s.intern
             @effect = effect
@@ -144,6 +154,8 @@ class SpellMerge
             @next = nil # Next effect in pseudo-queue
 
             @newline = false
+
+            @prompt = prompt
         end
 
         def all_names
@@ -233,7 +245,7 @@ class SpellMerge
 
         ## 3xx Cleric
         Effect.new(307, '@ looks empowered.', '@ look empowered.'),
-        Effect.new(307, '/@ seems hesitant, looking unsure of <a.*>\./', '@ seem hesitant, looking unsure of themselves.'),
+        Effect.new(307, '/@ seems hesitant, looking unsure of (?:<a.*>|himself|herself)\./', '@ seem hesitant, looking unsure of themselves.'),
         Effect.new(310, '@ basks in the glow of the sphere.', '@ bask in the glow of the sphere.'),
         Effect.new(310, '@ seems slightly different.', '@ seem slightly different.'),
 
@@ -261,6 +273,7 @@ class SpellMerge
                    '@ spirits are no longer lifted.',
                    proc {|names| "The spirits of #{names.gsub("'s", '')} are no longer lifted."}
         ),
+        Effect.new(1018, "The mana around @ returns to its natural state."),
 
         # 1035
         Effect.new(1035,
@@ -328,19 +341,21 @@ class SpellMerge
         Effect.new(1617, '@ looks determined and resolute.', '@ look determined and resolute.'),
 
         Effect.new(1618, 'The divine force surrounding @ slowly fades away.', 'The divine forces surrounding @ slowly fade away.'),  # 1618
-        Effect.new(1618, '/@ basks in a divine force that suddenly surrounds <a.*>\./', '@ bask in a divine force that suddenly surrounds them.'),
+        Effect.new(1618, '/@ basks in a divine force that suddenly surrounds (?:<a.*>|himself|herself)\./', '@ bask in a divine force that suddenly surrounds them.'),
 
         # Misc
         # Symbol of Disruption
         Effect.new(:disruption, 'The churning spectral aura suddenly vanishes from around @.'),
 
         # GROUP verb
-        Effect.new(:group, '@ is following you.', '@ are following you.'),
-        Effect.new(:group, '@ is also a member of your group.', '@ are also members of your group.'),
+        Effect.new(:group, '@ is following you.', '@ are following you.', prompt: true),
+        Effect.new(:group, '@ is also a member of your group.', '@ are also members of your group.', prompt: true),
         # Effect.new(:group, '@ is following you.', proc{|names| "Your group consists of #{names}." }),
         # Effect.new(:group, '@ is also a member of your group.', proc{|names| "Your group consists of #{names}."}),
-    ]
 
+        # SIGNAL
+        Effect.new(:signal, "@ acknowledged your signal.", prompt: true)
+    ]
     # EFFECTS.each{|e| echo e.pattern.inspect }
 
     # Settings
@@ -360,6 +375,7 @@ class SpellMerge
         @script = script
         @queue = Queue.new # Current effect queue.
         @mutex = Mutex.new # Synchronization mutex
+        @flush_pattern = FLUSH_PATTERN
 
         @stripxml = ($frontend != 'stormfront')
 
@@ -394,6 +410,19 @@ class SpellMerge
 
         # We can't change CharSettings within a hook procedure, so this is a hack to do it in the main loop instead
         @pending_changes_hack = nil
+
+        previous_version = GameSettings[:current_version] || 0
+        unless previous_version == VERSION_INT
+            if (Time.now - $login_time) > 60  # Has been more than 60 seconds since login, so we probably aren't from autostart
+                show_changelog(previous_version)
+            else
+                Thread.new{
+                    echo "Waiting to show changelog"
+                    sleep 10
+                    show_changelog(previous_version)
+                }
+            end
+        end
 
         run(script.vars[0])
     end
@@ -499,8 +528,9 @@ class SpellMerge
             end
         end
 
-        if line =~ FLUSH_PATTERN
+        if line =~ @flush_pattern
             flush_all
+            @flush_pattern = FLUSH_PATTERN
             return line
         end
 
@@ -515,6 +545,7 @@ class SpellMerge
                 @eat_newline = true
                 return nil if effect.deadline
                 effect.deadline = Time.now + DELAY
+                @flush_pattern = PROMPT_FLUSH_PATTERN if effect.prompt
                 if @tail
                     @tail.next = effect
                     @tail = @tail.next
@@ -951,6 +982,71 @@ class SpellMerge
         respond "  Spell effect messages with YOU as the target will never be merged.  Spell effect messages for"
         respond "  NPCs (i.e. familiars, animal companions, or spirit servants) are likewise not merged -- only"
         respond "  players."
+    end
+
+    def show_changelog(prev)
+        prev ||= 0
+        GameSettings[:current_version] = VERSION_INT
+
+        changelog = {
+            500000 => [
+                "Version 0.5 changes:",
+                '',
+                "  * Add support for Song of Power falloff.",
+                '',
+                "  * Add support for responses to SIGNAL.",
+                '',
+                "  * Still merge spells that refer to himself/herself when no-pronoun-links is running.",
+            ],
+            500001 => [
+                "Version 0.5.1 changes:",
+                '',
+                "  * Remove accidental debugging code left in regarding changelog handling.",
+            ],
+        }
+
+        if prev != VERSION_INT
+            msg = []
+            msg << "<preset id='speech'>--------------------</preset>"
+            msg << "<preset id='speech'>Welcome to #{$lich_char}#{@script.name}</preset> <preset id='whisper'>#{VERSION}</preset>"
+            msg << ''
+            changelog.each do |version, notes|
+                if version > prev or version == VERSION_INT
+                    msg += notes
+                    msg << ''
+                end
+            end
+            msg << "For a more detailed changelog: <d>#{$lich_char}repo info #{@script.name}</d>."
+            msg << "To enable automatic updates:   <d>#{$lich_char}repo set-updatable #{@script.name}</d>`."
+            msg << "For details on new features:   <d>#{$lich_char}#{@script.name} help</d>"
+            msg << "For more LostRanger scripts:   https://bit.ly/lostranger-scripts"
+            msg << ''
+            msg << "This message will not be displayed again until a new version is downloaded."
+            msg << "<preset id='speech'>--------------------</preset>"
+            send msg
+        end
+    end
+
+    def send(what)
+        unless $fake_stormfront
+            return _respond(what)
+        end
+
+        unless what.is_a?(Array)
+            what = [what]
+        end
+
+        return _respond what.map{|line|
+            if line =~ /^\s*<\/?output[^>]*>$/
+                nil
+            else
+                line = line.gsub(/<preset.*?>(.*?)<\/preset>/, "\\1")
+                line.gsub!('<pushBold/>', monsterbold_start)
+                line.gsub!('<popBold/>', monsterbold_end)
+                line.gsub!(/<\/?d.*?>/, '')
+                line
+            end
+        }.keep_if{|x| x}
     end
 end
 

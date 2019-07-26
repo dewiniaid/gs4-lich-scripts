@@ -60,9 +60,12 @@
 	  tags: lockpicking
 	  required: Lich >= 4.6.0.
 
-  version: 0.10 (2017-07-21)
+  version: 0.11 (2019-07-11)
 
   changelog:
+    version 0.11 (2019-07-11)
+      * Fix accidental garbage that breaks the script in Ruby 2.6
+
     version 0.10 (2017-07-21)
       * Significantly refactored internal stuff behind the scenes
       * `;box measure` now injects the lock difficulty numbers into the measuring output.
@@ -163,7 +166,7 @@ unless $_box_script_status
 end
 
 module BoxScript
-    VERSION = '0.10 (2017-07-21)'
+    VERSION = '0.11 (2019-07-11)'
     BOX_NOUNS = %w(box strongbox chest coffer trunk).to_set
     unless defined?(LOCK_DIFFICULTIES)
         LOCK_DIFFICULTIES = {}
@@ -697,7 +700,7 @@ module BoxScript
         c = CharSettings[:customer]
         name = c[:name] unless name
         waitrt?
-        fput "give #{c[:noun]} to #{name}"  #FIXME
+        fput "give my #{c[:noun]} to #{name}"  #FIXME
     end
 
     def self.next_command(name = nil)
@@ -994,8 +997,7 @@ module BoxScript
             "I could only find your calipers in '%C', which is an ignored container.",
             'You don\'t appear to holding calipers.'
         ) {|box, tool|
-            start_capture(/^You make some effort to fine-tune the <a exist="#{tool.id}"|^Those calipers could not be more perfectly calibrated\.|^You're good, but you're not that good\./)
-            # start_capture("You make some effort to fine-tune the <a exist=\"#{tool.id}\"")
+            start_capture("You make some effort to fine-tune the <a exist=\"#{tool.id}\"")
         }
     end
 
@@ -1278,8 +1280,6 @@ module BoxScript
         window.attributes['scroll'] = 'auto'
         window.attributes['resident'] = 'true'
         window.attributes['save'] = 'save' if @window_option == 'save'
-    else
-        ''
         @buffer << window.to_s
         $_box_script_status[:windowcreated] = true
         expose_window

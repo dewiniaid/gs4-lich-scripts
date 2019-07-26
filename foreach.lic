@@ -25,9 +25,14 @@
 	  tags: utility
 	  required: Lich >= 4.6.0.
 
-  version: 0.10.4 (2019-06-20)
+  version: 0.10.5 (2019-07-25)
 
   changelog:
+    version 0.10.5 (2019-07-25)
+      * Properly unsilence ourselves when we send actual commands.  Previously, people who trusted Foreach could not
+        see the commands it sent.  Now, only commands related to determining your initial inventory are squelched.
+      * You can now `;foreach q=/pattern/ in ...` to do regular expression matches.
+
     version 0.10.4 (2019-06-20)
       * Made multiple fixes to 'giveitem'.  It should actually be recognized as a command again.
       * Added a new 'fastinv'/'qinv' target, which is similar to 'inv' but skips the INV FULL step.  This allows for
@@ -791,8 +796,8 @@ end
 
 
 module ForeachScript
-    VERSION = '0.10.4 (2019-06-20)'
-    VERSION_INT = 10_004
+    VERSION = '0.10.5 (2019-06-20)'
+    VERSION_INT = 10_005
     CONFIG_VERSION = 2
     # FILTER_PATTERN = /^(?:(?:(?:(.+)=)?(.+)\s+(in|on|under|behind)\s+)|(in|on|under|behind)\s+)(.+)$/
     FILTER_PATTERN = /^(?:(in|on|under|behind)|(?:(?:(.+)=)?(.+?)\s+(in|on|under|behind)))\s+(.+)$/
@@ -1119,6 +1124,15 @@ module ForeachScript
                 "  * Added a new `fastinv`/`qinv` target.",
                 "    This is similar to `inv`, but skips the INV FULL step.  This allows for slightly faster startup but with some caveats.  For details, see the documentation.",
             ],
+            10_005 => [
+                "Version 0.10.5 changes:",
+                '',
+                "  * Properly unsilence ourselves when we send actual commands.",
+                "    Previously, people who trusted Foreach could not see the commands it sent.",
+                "    Now, only commands related to determining your initial inventory are squelched.",
+                '',
+                "  * You can now `;foreach q=/pattern/ in ...` to do regular expression matches.",
+            ],
         }
 
         if prev != VERSION_INT
@@ -1179,6 +1193,7 @@ module ForeachScript
         msg << "     #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in/on/under/behind <TARGETS>[; command; command; ...]"
         msg << "  or #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in/on/under/behind <TARGETS>[/ command/ command/ ...]"
         msg << "  or #{name} [OPTIONS] [[ATTRIBUTE=]VALUE] in/on/under/behind <TARGETS>[| command| command| ...]"
+        msg << "  or #{name} [OPTIONS] [ATTRIBUTE=]/PATTERN/ in/on/under/behind <TARGETS>[| command| command| ...]"
         # msg << ''
         # msg << "Type #{name} SET for settings"
         msg << ''
@@ -1188,6 +1203,8 @@ module ForeachScript
             msg << "    `quick` is equivalent to `fullname` with automatic wildcards at the ends."
             msg << ''
             msg << "**VALUE** is what the attribute's value must match.  Wildcards (with *) are supported.  Multiple VALUEs can be matched by separating them with commas."
+            msg << "**PATTERN** may be used instead, in which case it is a regular expression that the attribute must match."
+            msg << "Patterns are denoted by being surrounded by slashes, i.e. `/(blue|white) crystal/`"
             msg << ''
             msg << "**TARGETS** is a comma-separated list of one or more TARGETs, each of which can be a name of a container or one of the following:"
             msg << ''
@@ -1389,11 +1406,22 @@ module ForeachScript
         attr = 'type' unless attr
         return proc {|item| true} unless value
 
-        if attr == 'quick' or attr == 'q' then
+        if value =~ /^\/(.*)\/([a-zA-Z]+)?$/
+            options = $2
+            begin
+                pattern = Regexp.new($1, Regexp::IGNORECASE)
+            rescue => ex
+                echo ex.to_s
+                exit
+            end
+            echo "Note: 'quick' is equivalent to 'full' when using regular expressions." if attr == 'quick' or attr == 'q'
+            echo "Warning: Modifiers in regular expressions are not supported.  Patterns are always case-insensitive." if options
+        elsif attr == 'quick' or attr == 'q' then
             pattern = /(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})/i
         else
             pattern = /^(?:#{value.split(/\s*,\s*/).map{|x| "(?:#{Regexp::escape(x).gsub('\*', '.*')})"}.join('|')})$/i
         end
+
 
         case attr
         when 'type', 't'
@@ -1474,7 +1502,7 @@ module ForeachScript
             resume_scripts
         }
 
-        @script.vars[0] =~ /^\s*(.+?)\s*(?:([;\/|])\s*(.*?)\s*)?$/
+        @script.vars[0] =~ /^\s*(help|(?:.*\b(?:in|on|under|behind)\s+.+?))\s*(?:([;\/|])\s*(.*?)\s*)?$/i
         filter = $1
         separator = $2
         commands = $3
@@ -1706,7 +1734,7 @@ module ForeachScript
             end
 
             if target =~ /^(?:fast|q)inv(?:entory)?$/i and matcher.status_filter != 0
-                echo "Filtering by status requires a regular inventory view, changing '#{target}' to 'inv'"
+                echo "Filtering by status requires a regulary inventory view, changing '#{target}' to 'inv'"
                 target = "inv"
             end
 
@@ -1817,6 +1845,8 @@ module ForeachScript
         else
             statusbar = DummyStatusUpdater.new
         end
+
+        silence_me if $SAFE == 0
 
         before_next = nil  # Possibly skippable things to do before the next command.
         move_container_cache = {}  # Ids of discovered containers

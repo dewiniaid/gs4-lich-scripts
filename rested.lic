@@ -1,0 +1,151 @@
+=begin
+  Waits until you are clear as a bell and full on mana/stamina/spirit/HP, then logs you out.  Keeps you in-game in the
+  meantime.
+
+  If Dreaven or Iteno is in the room, assumes you're currently waiting for a Dreavening and keeps you online.
+
+  Useful for doing online absorption of XP after completing a bounty just before bed.
+
+  Previous versions of this stated that offline XP did not apply towards Lumnis.  This is incorrect, they do.
+
+	  author: LostRanger (thisgenericname@gmail.com)
+	  game: GemStone
+	  tags: utility
+	  required: Lich >= 4.6.0.
+
+  version: 0.3 (2019-07-17)
+
+  changelog:
+    version 0.3 (2019-07-17)
+      * Supports waiting for Dreavenings.  (You must already be at the table with Iteno or Dreaven.)
+      * Will not work if you are one of Dreaven's characters due to said Dreavening support.  But you can fix that. :p
+
+    version 0.2 (2019-07-17)
+      * Never trust a 0.1 release.
+
+    version 0.1 (2019-07-17)
+      * Initial release
+=end
+
+
+script.want_downstream = false
+script.want_upstream = false
+
+
+def keepalive
+    Script.current.want_downstream = true
+    fput "experience"
+    Script.current.want_downstream = false
+end
+
+
+def waiting_on
+    result = []
+
+    dreavening_pc = GameObj.pcs.find{|pc| pc.noun =~ /^(?:Dreaven|Iteno)$/i}
+    if dreavening_pc
+        result << "Dreavening (#{dreavening_pc.noun} is present)"
+    end
+
+    if XMLData.mind_value != 0
+        result << "Mind (#{XMLData.mind_text})"
+    end
+
+    [
+        ['Health', XMLData.health, XMLData.max_health],
+        ['Mana', XMLData.mana, XMLData.max_mana],
+        ['Stamina', XMLData.stamina, XMLData.max_stamina],
+        ['Spirit', XMLData.spirit, XMLData.max_spirit],
+    ].each do |name, cur, max|
+        result << "#{name} (#{cur}/#{max})" if cur < max
+    end
+
+    return nil if result.length == 0
+    return "Waiting for: #{result.join(', ')}"
+end
+
+keepalive
+
+if (result = waiting_on)
+    echo result
+else
+    echo "You are already ready to log out.  You could just type EXIT..."
+end
+
+sleep_until = Time.now + 30
+now = Time.now
+last_action = now
+last_report = now
+last_nag = nil
+ready_since = nil
+thread = Thread.current
+mutex = Mutex.new
+
+warning_message = [
+    "#{monsterbold_start}Script '#{script.name}' is currently running.  To avoid an unexpected logout, kill it with #{$lich_char}kill #{script.name}#{monsterbold_end}",
+    "[Your earliest possible automatic logout time has been changed to be 30 seconds from now.]"
+]
+
+before_dying { UpstreamHook.remove("rested_hook") }
+
+
+UpstreamHook.add("rested_hook", proc do |xml|
+    mutex.synchronize do
+        sleep_until = [sleep_until, now+30].max
+        now = Time.now
+        if last_nag.nil? or (now - last_nag) > 15
+            _respond warning_message
+            last_nag = now
+        end
+        if now - last_report > 15
+            result = waiting_on
+            if result
+                _respond "[#{result}]"
+            else
+                _respond "[You appear to be ready to log out.]"
+            end
+            last_report = now
+        end
+    end
+    thread.wakeup
+    xml
+end)
+
+
+while true
+    n = sleep_until - Time.now
+    sleep n if n > 0
+    mutex.synchronize do
+        now = Time.now
+        result = waiting_on
+        if result
+            if now - last_report > 120  # Haven't reported on status in awhile
+                echo result
+                last_report = now
+            end
+            if ready_since
+                echo "We no longer appear to be ready for logoff, restarting countdown."
+                ready_since = nil
+            end
+            sleep_until = [sleep_until, now+15].max
+        else
+            if ready_since
+                if now - ready_since > 15  # Have been ready for more than 15 seconds
+                    echo "Goodbye!"
+                    script.want_downstream = true
+                    fput "exit"
+                    exit
+                end
+            else
+                ready_since = now
+                echo "We appear to be ready to logoff, waiting a few moments just in case that changes..."
+            end
+            sleep_until = [sleep_until, now+5].max
+        end
+
+        if now - last_action > 75 # Haven't done anything in awhile
+            keepalive
+            last_action = now
+        end
+    end
+end

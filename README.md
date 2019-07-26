@@ -9,17 +9,24 @@ Note that the Lich repository is probably more up-to-date than the Github; see e
 ## What's Relatively New
 (These are repeated in the other lists):
 
+**ExpandedView**: When looking in containers, show item full names ("an opalescent glass jar containing selanthian 
+bloodjewels") rather than short names ("an opalescent glass jar").  Only needed if you don't use `FLAG SORTEDVIEW`.
+
+**Rested**: Keeps you online until your head is clear, your mana is full, and (if Dreaven or Iteno are around) you are 
+Dreavened.
+
+**No-Pronoun-Links**: Removes links from around `(he|she|his|her|him|it|its|himself|herself|itself)`
+
+**SortedSkills**: Shows SKILLS, SKILLS FULL, SKILLS BASE, or SKILLS BASE FULL output in the same order it appears on
+the Excel character training spreadsheet to make it easier to match up issues in your training. 
+
+**Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
+troubleshooting information.
+
 **ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
 INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
 (rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
 is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
-
-**TargetID**: Assigns targettable creatures a unique 3-letter tag and allows you to target based off of that tag.
-This is intended to let you determine which creature e.g. cast a gas cloud and target accordingly, but in actuality it's
-mostly all about the amusing thing of seeing "a mammoth arachnid (WEB)" or "a rolton (RPA) while hunting. 
-
-**Recolor**: Change the colors of familiars, demons, animal companions and other friendly NPCs in room descriptions so
-you don't think there are monsters in the room.
 
 ## Noteworthy Scripts For Everyone
 
@@ -72,6 +79,25 @@ when you know you're near one but haven't narrowed down the exact location.
 
 **Song-Timer**: Displays warnings at 2m/1m/30s/15s before songs renew to allow manual intervention if desired.  Best
 when combined with highlights and sound effects.
+
+**ExpandedView**: When looking in containers, show item full names ("an opalescent glass jar containing selanthian 
+bloodjewels") rather than short names ("an opalescent glass jar").  Only needed if you don't use `FLAG SORTEDVIEW`.
+
+**Rested**: Keeps you online until your head is clear, your mana is full, and (if Dreaven or Iteno are around) you are 
+Dreavened.
+
+**No-Pronoun-Links**: Removes links from around `(he|she|his|her|him|it|its|himself|herself|itself)`
+
+**SortedSkills**: Shows SKILLS, SKILLS FULL, SKILLS BASE, or SKILLS BASE FULL output in the same order it appears on
+the Excel character training spreadsheet to make it easier to match up issues in your training. 
+
+**Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
+troubleshooting information.
+
+**ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
+INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
+(rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
+is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
 
 ## Developer Tools
 

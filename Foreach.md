@@ -37,11 +37,16 @@ While not a full replacement for "proper" purpose-built Lich scripts, it is stil
   
 * Don't want to sell ALL of your diamonds for said bounty?  
   `;foreach first 7 name=uncut diamond in inv;get item;sell item`
-
+  
 * Doing a long task and want to be able to resume it later (possibly on the same source container?)  
   `;foreach unmarked gem in whereever;get item;do lots of things;mark item;return` as many times as needed, followed by  
   `;foreach marked gem in whereever;get item;unmark item`  
   (`whereever` must be a container in your inventory or your entire `inv`)
+
+* Need to ditch your sorcerer wands but want the wizard ones?  
+  `;foreach q=/(bloodwood|twisted|yew|bone|glass|thanot) wand/ in inv;sell`  
+  (This uses the new pattern matching introduced in 0.10.5)
+
      
 ## That's nice.  But what can it REALLY do?
 
@@ -113,6 +118,8 @@ _pattern_ can be:
     'snowflake-cut' anywhere in the name, for instance.
   * `this,that`: Match any one of the options separated by commas.
   * `blue sapphire,emerald,*diamond,*emerald,uncut ruby`: You can mix the above.
+  * `/(blue|white) crystal/`: You can match against a regular expression.  The slashes are required, and matching is 
+    always case-insensitive.
   
 ### Targets
 
@@ -393,6 +400,11 @@ Depending on the level of depth you want, either just read the bold parts, just 
        until you are out of roundtime)
 
 ## Changelog
+
+### Version 0.10.5 (2019-06-20)
+  * Properly unsilence ourselves when we send actual commands.  Previously, people who trusted Foreach could not
+    see the commands it sent.  Now, only commands related to determining your initial inventory are squelched.
+  * You can now `;foreach q=/pattern/ in ...` to do regular expression matches.
 
 ### Version 0.10.4 (2019-06-20)
   * Made multiple fixes to 'giveitem'.  It should actually be recognized as a command again.
