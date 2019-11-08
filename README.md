@@ -17,6 +17,7 @@ will update accordingly, including [x]narost.
 
 **LinkToTheFast**: Stormfront is slow at rendering links.  LinkToTheFast wraps all links in the 'link' preset, so you can
 turn off links (for speed) but still see them.
+
 **Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
 troubleshooting information.  Now can also report downloaded versiosn of your scripts.
 
