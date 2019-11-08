@@ -9,24 +9,16 @@ Note that the Lich repository is probably more up-to-date than the Github; see e
 ## What's Relatively New
 (These are repeated in the other lists):
 
-**ExpandedView**: When looking in containers, show item full names ("an opalescent glass jar containing selanthian 
-bloodjewels") rather than short names ("an opalescent glass jar").  Only needed if you don't use `FLAG SORTEDVIEW`.
+**Tour**: Walk around the world from the comfort of your table or a safe place.  Tour lets you see rooms in the MapDB
+and -- while it is running -- hijacks all clientside movement to 'pretend' to move you between rooms.  Other Lich scripts
+will update accordingly, including [x]narost.
 
-**Rested**: Keeps you online until your head is clear, your mana is full, and (if Dreaven or Iteno are around) you are 
-Dreavened.
+**XRaffle**: Raffle tracking script with various options for displaying raffles.  Still in testing.
 
-**No-Pronoun-Links**: Removes links from around `(he|she|his|her|him|it|its|himself|herself|itself)`
-
-**SortedSkills**: Shows SKILLS, SKILLS FULL, SKILLS BASE, or SKILLS BASE FULL output in the same order it appears on
-the Excel character training spreadsheet to make it easier to match up issues in your training. 
-
+**LinkToTheFast**: Stormfront is slow at rendering links.  LinkToTheFast wraps all links in the 'link' preset, so you can
+turn off links (for speed) but still see them.
 **Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
-troubleshooting information.
-
-**ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
-INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
-(rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
-is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
+troubleshooting information.  Now can also report downloaded versiosn of your scripts.
 
 ## Noteworthy Scripts For Everyone
 
@@ -51,7 +43,9 @@ is first), prevents PUT from dropping items, and prevents awkward mishaps with S
 This is intended to let you determine which creature e.g. cast a gas cloud and target accordingly, but in actuality it's
 mostly all about the amusing thing of seeing "a mammoth arachnid (WEB)" or "a rolton (RPA) while hunting. 
 
-**Go2Shop**: Travel to a player shop by name.  The playershop does not need to be in the map database.
+**Go2Shop**: Travel to a player shop by name.  The playershop does not need to be in the map database.  Depends on (and automatically downloads) Findshop.
+
+**Findshop**: Locate a shop's browse page by name.
 
 **Survey**: Quick and dirty script to look at everything in the room, ideal for examining merchant events.
 
@@ -92,12 +86,17 @@ Dreavened.
 the Excel character training spreadsheet to make it easier to match up issues in your training. 
 
 **Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
-troubleshooting information.
+troubleshooting information.  Now can also report downloaded versiosn of your scripts.
 
-**ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
-INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
-(rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
-is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
+**Tour**: Walk around the world from the comfort of your table or a safe place.  Tour lets you see rooms in the MapDB
+and -- while it is running -- hijacks all clientside movement to 'pretend' to move you between rooms.  Other Lich scripts
+will update accordingly, including [x]narost.
+
+**XRaffle**: Raffle tracking script with various options for displaying raffles.  Still in testing.
+
+**LinkToTheFast**: Stormfront is slow at rendering links.  LinkToTheFast wraps all links in the 'link' preset, so you can
+turn off links (for speed) but still see them.  
+
 
 ## Developer Tools
 
