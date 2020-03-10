@@ -9,7 +9,12 @@ Note that the Lich repository is probably more up-to-date than the Github; see e
 ## What's Relatively New
 (These are repeated in the other lists):
 
-**Tour**: Travel the world without going anywhere.  While ;tour is running, most movement commands only pretend to move you.  This allows you to look at room descriptions and other attributes without actually visiting them.
+**Tour**: Walk around the world from the comfort of your table or a safe place.  Tour lets you see rooms in the MapDB
+and -- while it is running -- hijacks all clientside movement to 'pretend' to move you between rooms.  Other Lich scripts
+will update accordingly, including [x]narost.
+
+**LinkToTheFast**: Stormfront is slow at rendering links.  LinkToTheFast wraps all links in the 'link' preset, so you can
+turn off links (for speed) but still see them.
 
 **DragStop**: Automatically stop dragging a corpse when they stop being a corpse or they arrive at a town or Voln.  (You can manually start dragging again if you need to move them more.)  
 
@@ -59,7 +64,9 @@ is first), prevents PUT from dropping items, and prevents awkward mishaps with S
 This is intended to let you determine which creature e.g. cast a gas cloud and target accordingly, but in actuality it's
 mostly all about the amusing thing of seeing "a mammoth arachnid (WEB)" or "a rolton (RPA) while hunting. 
 
-**Go2Shop**: Travel to a player shop by name.  The playershop does not need to be in the map database.
+**Go2Shop**: Travel to a player shop by name.  The playershop does not need to be in the map database.  Depends on (and automatically downloads) Findshop.
+
+**Findshop**: Locate a shop's browse page by name.
 
 **Survey**: Quick and dirty script to look at everything in the room, ideal for examining merchant events.
 
@@ -110,6 +117,18 @@ is first), prevents PUT from dropping items, and prevents awkward mishaps with S
 
 **DoctorWho**: Highlights (in monsterbold, for now) when you receive healing from a player, so you can see Who your Doctor was.
 
+**Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
+troubleshooting information.  Now can also report downloaded versiosn of your scripts.
+
+**Tour**: Walk around the world from the comfort of your table or a safe place.  Tour lets you see rooms in the MapDB
+and -- while it is running -- hijacks all clientside movement to 'pretend' to move you between rooms.  Other Lich scripts
+will update accordingly, including [x]narost.
+
+**XRaffle**: Raffle tracking script with various options for displaying raffles.  Still in testing.
+
+**LinkToTheFast**: Stormfront is slow at rendering links.  LinkToTheFast wraps all links in the 'link' preset, so you can
+turn off links (for speed) but still see them.  
+
 **TLogin**: TLogin is a fork of `;login` that uses the same login information to log you into the GS Test instance.
 
 **Go2Table**: Take you to the nearest available table.
@@ -139,8 +158,6 @@ from your current room to your destination (`;route2 228`) or between two differ
 
 **Metamap**: Metamap is a tool for specifying information like proper names and categories for maps.  Its metadata is 
 used by XNarost and possibly some other scripts.
-
-**Tour**: Travel the world without going anywhere.  While ;tour is running, most movement commands only pretend to move you.  This allows you to look at room descriptions and other attributes without actually visiting them.
 
 ## Misc/Unsupported
 
