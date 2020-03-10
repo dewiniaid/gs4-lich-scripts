@@ -12,9 +12,14 @@
 	  tags: inspect
 	  required: Lich >= 4.6.0
 
-  version: 0.5 (2017-07-01)
+  version: 0.7 (2019-10-23)
 
   changelog:
+    version 0.7 (2019-10-23)
+      * Now works with items in Trove
+    version 0.6 (2019-08-08)
+      * Now works with items in pawnshops and other similar locales.
+      * Now shows base item weights.
     version 0.5 (2017-07-01)
       * ;inspect by itself now shows the table of weights and item counts
     version 0.4 (2017-06-23)
@@ -62,7 +67,8 @@ class InspectScript
 
     COUNT_PATTERN = /(with enough space for (.*?)) ((?:of )?items?)/
 
-    ARMOR_PATTERN = /(.*allows you to conclude that it is (.*?) armor that covers the (.*?)\.)(.*)/
+    # ARMOR_PATTERN = /(.*allows you to conclude that it is (.*?) armor that covers the (.*?)\.)(.*)/
+    ARMOR_PATTERN = /(.*is (.*?) armor that covers the (.*?)\.)(.*)/
 
     ARMOR_GROUPS = {
         'cloth' => 0,
@@ -100,12 +106,20 @@ class InspectScript
         20 => 'Full Plate'
     }
 
+    ASG_WEIGHTS = [
+        nil,
+        nil, 8, nil, nil,
+        10, 13, 15, 16,
+        16, 17, 20, 25,
+        25, 25, 26, 27,
+        23, 25, 50, 70
+    ]
+
     def initialize(script)
         @script = script
         @script.want_downstream = false
         @script.want_downstream_xml = false
         @started = false
-        @pending = 0
         @mainthread = nil
     end
 
@@ -138,7 +152,7 @@ class InspectScript
     def hook(line) # and sinker
         unless @started
             # Look for 'You carefully inspect' to trigger activity.
-            if line =~ /(?:You carefully (?:inspect|examine).*<a)|(?:What were you referring to\?)|(?:You can't inspect that)/
+            if line =~ /^The following details about |(?:You carefully (?:inspect|examine).*<a)|(?:What were you referring to\?)|(?:You can't inspect that)/
                 @started = true
             end
             return line
@@ -171,12 +185,14 @@ class InspectScript
             else
                 subgroup += 4*group
             end
-            line = "#{before}  (ASG #{subgroup}: #{ASG_TABLE[subgroup]})  #{after}\n"
+            weight = ASG_WEIGHTS[subgroup]
+            if weight
+                weight = ", base #{weight} lbs"
+            end
+
+            line = "#{before}  (ASG #{subgroup}: #{ASG_TABLE[subgroup]}#{weight})  #{after}\n"
         end
-        if line.include?('</prompt>')
-            @finished = true
-            @mainthread.run
-        end
+        @mainthread.kill if line.include?('<prompt')
         return line
     end
 
@@ -187,21 +203,14 @@ class InspectScript
         end
 
         silence_me if $SAFE == 0  # Trusting this script will prevent it from sending INSPECT, optional.
-
-        before_dying {
-            DownstreamHook.remove("inspect_modify_hook")
-        }
-
+        before_dying { DownstreamHook.remove("inspect_modify_hook") }
         waitrt?
 
         @mainthread = Thread.current
         @script.want_downstream_xml = true
         DownstreamHook.add("inspect_modify_hook", proc{|line| hook(line)})
         fput "inspect #{vars[0]}"
-        sleep(1) until @finished
-        DownstreamHook.remove("inspect_modify_hook")
-        @script.want_downstream_xml = false
-        undo_before_dying
+        sleep
     end
 end
 

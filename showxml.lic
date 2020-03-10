@@ -4,9 +4,11 @@
 
 	 author: LostRanger (thisgenericname@gmail.com)
 	   game: any
-  version: 0.2 (2017-06-24)
+  version: 0.3 (2020-03-08)
 
   changelog:
+    0.3 (2020-03-08):
+      * Change `puts` to `_respond` for Profanity and other users.
     0.2 (2017-05-07):
       * avoid whitespace collapse in ShowXML window.
     0.1 (2017-05-07):
@@ -19,7 +21,7 @@ unless defined?(script.want_script_output)
 end
 
 class ShowXMLScript
-	VERSION = '0.2 (2017-06-24)'
+	VERSION = '0.3 (2020-03-08)'
 
 	BOOLEAN_MAP = {
 			'yes' => true, 'true' => true, 'on' => true, '1' => true,
@@ -185,7 +187,7 @@ class ShowXMLScript
 			xml.attributes['id'] = @window_id
 			buffer << xml.to_s
 		end
-		puts buffer.join('')
+		_respond buffer.join('')
 
 		# Determine wrapper commands for writing to the window
 		before = "<pushStream id='#{@window_id}' /><output class='mono'/>"
@@ -210,7 +212,7 @@ class ShowXMLScript
 					output = "<b>#{output}</b>\n"
 				end
 			end
-			puts "#{before}#{output}#{after}"
+			_respond "#{before}#{output}#{after}"
 		end
 
 		Thread.kill(@thread)

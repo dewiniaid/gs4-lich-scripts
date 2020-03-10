@@ -19,9 +19,14 @@
   tags: utility
   required: Lich >= 4.6.0.
 
-  version: 0.5.1 (2019-06-05)
+  version: 0.6 (2019-07-30)
 
   changelog:
+    version 0.6 (2019-07-30)
+      * Support animates from Animate Dead and animated weapons, provided the latter still begin with 'animated'
+      * Support matching ALL locations a name occurs rather than merely within room descriptions.
+      * Added slight optimizations to pattern matching.
+
     version 0.5.1 (2019-06-05)
       * Add cockatiels as recognized familiars.
 
@@ -87,8 +92,8 @@
 
 
 module RecolorScript
-    VERSION = '0.5.1 beta (2019-06-05)'
-    VERSION_INT = 500100
+    VERSION = '0.6 beta (2019-07-30)'
+    VERSION_INT = 600000
 
     PATTERNS = {
         # Base desc in $1, items and NPCs in $2
@@ -139,7 +144,7 @@ module RecolorScript
             spirit
         /ix,
 
-        :grasp_of_the_grave => /^(?:pair of )?[-a-z]+ arms?$/,  # Experimental
+        :grasp_of_the_grave => /^(?:pair of )?[-a-z]+ arms?$|salt-crusted .*pincer/,  # Experimental
 
         # Matches a summoned demon.  Experimental
         :summoned_demon => /
@@ -156,7 +161,7 @@ module RecolorScript
             (?:blurred|hazy|indistinct|misty|nebulous|shifting|vaporous)  # Descriptor
             \ .*\   # Color
             (?:darkling|shadowling)$  # Nouns
-        /x,
+        /ix,
 
         # Demon illusions
         :illusion_lookup => Set.new(
@@ -183,8 +188,11 @@ module RecolorScript
         ),
         :illusion_pattern => /^(?:lazy wild .+ dog|listless .+ jackal|docile .+ coyote|languid .+ wolf|mangy .+ fox)$/,
 
+        # Animates
+        :animates => /^animated /,
+
         # Explicit exceptions
-        :hostile => /abyran'ra$/
+        :hostile => /(abyran'ra$|slush$)/,
     }
 
     HOOK_NAME = 'recolor_room_hook'
@@ -245,6 +253,17 @@ module RecolorScript
                 '',
                 "  * Recognize cockatiels as Wizard familiars."
             ],
+            600000 => [
+                "Version 0.6 changes:",
+                '',
+                "  * Support animates from Animate Dead and animated weapons, provided the latter still begin with 'animated'",
+                "    To enable this, do `;recolor animates`.  To disable it, `recolor noanimates`",
+                '',
+                "  * Support matching ALL locations a name occurs rather than merely within room descriptions.  (Experimental)",
+                "    To enable this, do `;recolor global`.  To disable it, `recolor noglobal`",
+                '',
+                "  * Added slight optimizations to pattern matching.",
+            ]
         }
 
         if prev != VERSION_INT
@@ -299,14 +318,17 @@ module RecolorScript
 
         ignore_safety = false
 
-        if match[5] =~ PATTERNS[:hostile]
-            friendly = false
-        elsif match[5] =~ PATTERNS[:spirit_servant]
+        if match[5] =~ @friendly_pattern
+            if $1
+                friendly = false
+            else
+                friendly = true
+            end
+        elsif @settings[:illusions] and PATTERNS[:illusion_lookup].include?(match[5])
             friendly = true
-        elsif @settings[:demons] and match[5] =~ PATTERNS[:summoned_demon]
+        elsif @settings[:animates] and match[5] =~ PATTERNS[:animates]
             friendly = true
-        elsif @settings[:illusions] and (PATTERNS[:illusion_lookup].include?(match[5]) or match[5] =~ PATTERNS[:illusion_pattern])
-            friendly = true
+            ignore_safety = true
         elsif @settings[:grasp] and match[5] =~ PATTERNS[:grasp_of_the_grave]
             friendly = true
             ignore_safety = true
@@ -353,6 +375,8 @@ module RecolorScript
             post = $3
             text = $2.gsub(PATTERNS[:strip_bold], '')
             return pre + reformat_all(text) + post + "\n"
+        elsif @settings[:global]
+            return reformat_all(xml)
         else
             return xml
         end
@@ -391,7 +415,7 @@ module RecolorScript
             self.preset_color(get_color(:color)),
             "dead=#{self.preset_color(get_color(:deadColor))}"
         ]
-        [:keeplink, :demons, :illusions, :monsterbold, :patch, :grasp].each{|k|
+        [:keeplink, :demons, :illusions, :monsterbold, :patch, :grasp, :animates, :global].each{|k|
             if @settings[k]
                 result << k.to_s
             else
@@ -439,9 +463,11 @@ module RecolorScript
             msg << "    [no]illusions   - [Don't] consider illusioned demons as friendly."
             msg << "    [no]monsterbold - [Don't] skip creatures that aren't already in <pushBold/>monsterbold<popBold/>."
             msg << "    [no]grasp       - [Don't] recolor arms from Grasp of the Grave.  (May not apply to altered arms.)"
+            msg << "    [no]animates    - [Don't] recolor animated creatures/weapons"
             msg << "    [no]patch       - [Don't] apply mini-XML patch to identify animal companions and wizard familiars."
             msg << "                      (This has no effect in the current session if the patch has already been applied,"
             msg << "                      by either this script or xmlpatch)"
+            msg << "    [no]global      - [Don't] apply Recolor everywhere (rather than simply in room descriptions)"
             msg << ''
             msg << "    ignore          - Don't complain about invalid options.  (Useful if specifying colors for both StormFront and Wizard FEs)"
             msg << "    loud            - Yell loudly if a creature is identified as friendly but appears in GameObj.targets.  (This should never happen.)"
@@ -457,7 +483,7 @@ module RecolorScript
             else
                 msg << "Colors correspond to your color choices in Configuration -> Text Strings."
                 msg << "Stormfront has a different selection of color settings, available when running Stormfront."
-                msg << "Wizard FE colors and Stormfront FE colors are saved separately."
+                msg << "Wizard FE colors and StormFront FE colors are saved separately."
             end
             msg << ''
             msg << "Current settings for #{XMLData.name} are:"
@@ -481,7 +507,7 @@ module RecolorScript
             'loud' => [:loud, true],
             'quiet' => [:loud, false],
         }
-        %w(keeplink demons monsterbold patch grasp illusions).each do |k|
+        %w(keeplink demons monsterbold patch grasp illusions animates global).each do |k|
             bool_settings[k] = [k.to_sym, true]
             bool_settings["no"+k] = [k.to_sym, false]
         end
@@ -558,6 +584,7 @@ module RecolorScript
             @settings.merge!(new_settings)
             @need_to_save_settings = true
             self.update_wrappers
+            self.update_patterns
             send "#{@script.name}: Settings changed to #{current_settings_string}" if running
         end
     end
@@ -651,11 +678,14 @@ module RecolorScript
         settings[:monsterbold] = true if settings[:monsterbold].nil?
         settings[:grasp] = false if settings[:grasp].nil?
         settings[:illusions] = settings[:demons] if settings[:illusions].nil?
+        settings[:animates] = settings[:demons] if settings[:animates].nil?
+        settings[:global] = false if settings[:global].nil?
 
         @settings = settings
 
         exit if self.exec(script.vars[0])
         self.update_wrappers
+        self.update_patterns
         mini_xml_patch if settings[:patch]
 
         msg = []
@@ -688,6 +718,17 @@ module RecolorScript
                 changelog_when = nil
             end
         end
+    end
+
+    def self.update_patterns
+        patterns = [
+            PATTERNS[:hostile],
+            PATTERNS[:spirit_servant]
+        ]
+        patterns << PATTERNS[:summoned_demon] if @settings[:demons]
+        patterns << PATTERNS[:illusion_pattern] if @settings[:illusions]
+        # patterns << PATTERNS[:animates] if @settings[:animates]
+        @friendly_pattern = Regexp.new(patterns.map(&:to_s).join('|'))
     end
 
     def self.mini_xml_patch

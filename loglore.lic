@@ -37,9 +37,11 @@
 
   author: LostRanger (thisgenericname@gmail.com)
   game: GemStone
-  version: 0.3 (2017-06-02)
+  version: 0.3.1 (2017-06-19)
 
   changelog:
+    0.3.1 (2017-06-19)
+      * Accept commands while running from non-Stormfront users as well.
     0.3 (2017-06-02)
       * Add LOGLORE OPEN to open your current logfile in your default text editor (Windows only)
       * Add LOGLORE DIR to open your current log directory in Explorer (Windows only)
@@ -82,7 +84,7 @@ end
 
 
 class LogLore
-    VERSION = "0.3 (2017-06-02)"
+    VERSION = "0.3.1 (2017-06-19)"
 
     # With apologies to http://stackoverflow.com/questions/1732348/regex-match-open-tags-except-xhtml-self-contained-tags
     # for the terrible, terrible regex parsing of XML that is done here.
@@ -102,40 +104,60 @@ class LogLore
         # Matches the Abandoned Inn crystal
         :aicrystal => /^You touch the <a exist="\d+" noun="crystal">crystal<\/a> with one hand, your <a exist="(?<id>\d+)" noun="(?<noun>.+?)">(?<partial_name>.+?)<\/a> in the other hand\./,
 
-        # Matches the result of INV HANDS
+        # Matches the result of INV HANDS and GLANCE
         :hands => /(?x)
-        (?:<dialogData.*<\/dialogData>)*
-        You\shave
-          (?:# Right hand contents
-            .+?(?:(?<right_article>an?)\s)?
-            <a\sexist="(?<right_id>\d+)"\snoun="(?<right_noun>.+?)">(?<right_name>.+?)<\/a>
-            \sin\syour\sright\shand
-            (?:\sand)?
-          )?
-          (?:# Left hand contents
-            .+?(?:(?<left_article>an?)\s)?
-            <a\sexist="(?<left_id>\d+)"\snoun="(?<left_noun>.+?)">(?<left_name>.+?)<\/a>
-            \sin\syour\sleft\shand
-          )?
-        \.\s*$
-      /,
+            ^          # Anchor to start
+            (?:<.*>)?  # Discard leading XML, if any
+            (?:
+            (?:You\ glance\ down\ to\ see|You\ have)\    # GLANCE or INV HANDS
+            (?:    # Right hand
+                (?:nothing|
+                (?:(?<right_pre>[^<]+)\ )?
+                <a\ exist="(?<right_exist>-?\d+)"\ noun="(?<right_noun>[^"]+)">(?<right_name>[^<]+)<\/a>
+                (?:\ (?<right_post>.+?))?)
+                \ in\ your\ right\ hand
+                (?:\ and \ )?
+            )
+            (?:    # Left hand
+                (?:nothing|
+                (?:(?<left_pre>[^<]+)\ )?
+                <a\ exist="(?<left_exist>-?\d+)"\ noun="(?<left_noun>[^"]+)">(?<left_name>[^<]+)<\/a>
+                (?:\ (?<left_post>.+?))?)
+                \ in\ your\ left\ hand
+                (?:\ and \ )?
+            )
+            |You\ glance\ down\ at\ your\ empty\ hands
+            |You\ have\ nothing\ in\ your\ hands
+            )
+            \.\s*
+            $
+        /,
 
         # Matches <prompt
         :prompt => /^<prompt/,
 
         # Matches a fully qualified item identifier.
-        :itemref => /(?x)^
-        (?:<dialogData.*<\/dialogData>)*  # Don't want this
-        (?:
-          # Must match one of these things to be a (known) fully qualified item reference
-          (?:You\saccept.*'s<\/a>\soffer\sand\sare\snow\sholding\s)  # ACCEPT
-          |
-          (?:(?:<clearContainer.*?\/inv>)?You\s(?:(?:remove)|(?:put)|(?:drop)|(?:pick up)))\s  # GET PUT DROP
-        )
-        # Fully qualified reference
-        (?:(?<article>an?)\s)?
-        <a\sexist="(?<id>\d+)"\snoun="(?<noun>.+?)">(?<name>.+?)<\/a>
-      /,
+        :itemref => /(?x)
+        ^
+        (?:<.*>)?  # Discard leading XML, if any
+                   (?:
+                   You\ accept\ <a.*?\/a>\ offer\ and\ are\ now\ holding\
+             | You\ (?:pick\ up|drop|put|remove)\
+            )
+            (?:(?<pre>[^<]+)\ )?
+            <a\ exist="(?<exist>-?\d+)"\ noun="(?<noun>[^"]+)">(?<name>[^<]+)<\/a>
+            (?:\ (?<post>[^<]+?))?
+            (?:   # Source container reference
+               \
+               (?:from\ )?
+               (?:(?<location>in|on|under|behind)\ ?)
+               (?:(?<container_pre>[^<]+)\ )?
+               <a\ exist="(?<container_exist>-?\d+)"\ noun="(?<container_noun>[^"]+)">(?<container_name>[^<]+)<\/a>
+               (?:\ (?!that\ is\ on\ the\ ground)(?<container_post>[^<]+?))?
+               (?<floor>\ that\ is\ on\ the\ ground)?
+            )?
+            \.\s*$   # Terminator
+        /
     }
 
     CACHESIZE = 20 # Remember full item names of this many items.
@@ -219,27 +241,35 @@ class LogLore
         flush_item
     end
 
-    def discover_item(id, name, article=nil)
+    def discover_matchdata(matchdata, prefix='')
+        exist = matchdata[:"#{prefix}exist"]
+        pre = matchdata[:"#{prefix}pre"]
+        post = matchdata[:"#{prefix}post"]
+        noun = matchdata[:"#{prefix}noun"]
+        name = matchdata[:"#{prefix}name"]
+        discover_item(exist, name, pre, post)
+    end
+
+    def discover_item(id, name, pre=nil, post=nil)
         # Used when we discover the full name of an item to cache it.
-        debug "[discover_item #{id} #{name.inspect} #{article.inspect}]"
+        debug "[discover_item #{id} #{pre.inspect} #{name.inspect} #{post.inspect}]"
         return unless id
-        if article
-            name = "#{article} #{name}"
-        end
+        full_name = "#{pre}#{' ' if pre.length > 0}#{name}#{' ' if post.length > 0}#{post}"
+
         if @item_id == id
-            @item_name = name
+            @item_name = full_name
             got_full_name
         end
         if @cache.include?(id)
             # Need to delete and re-create to push it to the end of the cache hash
             @cache.delete(id)
         end
-        @cache[id] = name
+        @cache[id] = full_name
         if @cache.size > CACHESIZE
             k, v = @cache.first
             @cache.delete(k)
         end
-        debug "[discovered that ##{id} is a #{name}]"
+        debug "[discovered that ##{id} is a #{full_name}]"
     end
 
     def debug(str)
@@ -281,7 +311,7 @@ class LogLore
             @have_full_name = false
             if CharSettings['find_full_name'] == true
                 waitrt?
-                fput "inv hands"
+                fput 'glance'
             end
         end
     end
@@ -329,14 +359,16 @@ class LogLore
 
         if xml =~ PATTERNS[:hands] # We saw the contents of our hands
             debug "hands"
-            discover_item($~[:right_id], $~[:right_name], $~[:right_article])
-            discover_item($~[:left_id], $~[:left_name], $~[:left_article])
+            discover_matchdata($~, 'right_')
+            # discover_item($~[:right_exist], $~[:right_name], $~[:right_pre], $~[:right_post])
+            # discover_item($~[:left_exist], $~[:left_name], $~[:left_article])
             return
         end
 
         if xml =~ PATTERNS[:itemref] # We saw any one of a number of actions that can reveal item full names
             debug "itemref"
-            discover_item($~[:id], $~[:name], $~[:article])
+            discover_matchdata($~, '')
+            # discover_item($~[:id], $~[:name], $~[:article])
             return
         end
 
@@ -411,13 +443,12 @@ class LogLore
 
         clear
 
-        trigger = "<c>#{$lich_char}#{@script.name}"
-        tspace = trigger + " "
+        trigger = /^(?:<c>)?#{Regexp::escape("#{$lich_char}#{@script.name}")}(?:\s+.*)?$/
 
         worker = Thread.new {
             UpstreamHook.add("loglore_upstream_hook", proc {|data|
                 command = data.downcase.strip
-                if command.start_with?(tspace) or command == trigger
+                if command =~ trigger
                     args = command.split(/\s+/)
                     eventq.push([true, args])
                     data = nil

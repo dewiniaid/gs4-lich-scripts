@@ -21,20 +21,27 @@
                             to refresh.  Use this if GRAB or LIST are acting up.  Will not examine
                             closed containers, or containers that are in other containers.
 
-   ;box ACCEPT {WAIT}       ACCEPT an offer and remember who offered it.  If 'WAIT' is specified, will
+   ;box ACCEPT [WAIT]       ACCEPT an offer and remember who offered it.  If 'WAIT' is specified, will
                             wait for an offer if one is not currently pending.  Items that do not look
                             like boxes will not be automatically accepted.
+                            Puts ;box in 'customer mode'
 
-   ;box RETURN [<player>]   Return the box you recently accepted to whoever offered it to you, or to
-                            <player>
+   ;box JOB                 Ask the box pool worker for a job.
+                            Puts ;box in 'job mode'
 
-   ;box NEXT [<player>]     Same as doing ';box RETURN <player>' and ';box ACCEPT wait', in
+   ;box RETURN [<player>]   Customer mode: Return the box you recently accepted to whoever offered it to you,
+                            or to <player>.
+                            Job mode: Asks the worker to check your work.
+
+   ;box NEXT [<player>]     Customer mode: Does ';box RETURN <player>' and ';box ACCEPT wait', in
                             that order.
+                            Job mode: Does ';box RETURN' and ';box JOB', in that order.
 
    ;box DISARM or DETECT    Disarm the currently held box, whatever it happens to be named -- or detect
                             traps without attempting to disarm.
 
-   ;box DETECT              Detect traps on the current held box (without trying to disarm them).
+   ;box SCARABS [<opts>]    Configures the automatic scarab disarming that can happen as part of ;box disarm
+                            Type `;box SCARABS` by itself for more details.
 
    ;box UNLOCK [<lockpick>] Unlock the currently held box using the specified lockpick.  If <lockpick>
                             consists of multiple words, this will try to find any matching lockpick,
@@ -48,7 +55,6 @@
                             lock mastery.  Type ;box COMMAND by itself to see more details on this
                             option.
 
-
    ;box WINDOW [<option>]   Configures the lockpicking results window, where <option> is one of:
                             OFF, ON, SAVE, CLEAR, or SHOW.  WINDOW by itself will show the current
                             configuration.  Only available in StormFront.  EXPERIMENTAL.
@@ -60,9 +66,40 @@
 	  tags: lockpicking
 	  required: Lich >= 4.6.0.
 
-  version: 0.11 (2019-07-11)
+  version: 0.17 (2020-03-06)
 
   changelog:
+    version 0.17 (2020-03-06)
+      * Should no longer stall on open rolls.
+
+    version 0.16 (2020-03-03)
+      * Disarm/detect captures should no longer be confused by something else referencing the box, such as a LOOK ON TABLE in-flight.
+      * Disarm/detect messaging no longer stalls ;box if the box is already open.
+      * NPC dialog when acquiring a job with ;box job is now copied to the lockpicking window
+      * Who you accepted a box from using ;box accept is now copied to the lockpicking window.
+
+    version 0.15 (2020-03-02)
+      * ;box should properly work again when there is no lockpicking window.
+
+    version 0.14 (2020-03-02)
+      * Calipers can now be calibrated with no box target.  This will fail if you don't have at least 40 ranks of LM.
+      * Fix a hang when attempting to calibrate already-calibrated calipers.
+      * Fix a bug when looking for a box on a nonexistant table.
+      * `;box empty` and `;box drop will` properly fail out if you aren't holding a box but have one from the pool.
+      * Added an option to automatically disarm and optionally pick up or loot scarabs, configurable via `;box scarabs`
+        NOTE: AUTOMATIC LOOTING IS EXPERIMENTAL.  IT MAY KILL YOU (but shouldn't.)
+
+    version 0.13 (2020-03-01)
+      * ;box now remembers whether it's working with traditional customer boxes or boxes from the job pool.
+        `;box job` asks the worker for a job and puts ;box in 'job mode'
+        `;box accept` puts ;box back in 'customer mode'
+        `;box next` and `;box return` now interact with the box pool while in job mode:
+           ;box return does ASK <npc> ABOUT CHECK, and ;box next follows that up with ASK <npc> ABOUT JOB.
+
+    version 0.12 (2020-03-01)
+      * Added preliminary support for the box pool.  To work, you *may* occasionally need to manually LOOK ON TABLE.
+        Improved support to come in a later release.
+
     version 0.11 (2019-07-11)
       * Fix accidental garbage that breaks the script in Ruby 2.6
 
@@ -137,7 +174,7 @@
 
 
 if CharSettings['command'] and CharSettings[:command].nil?
-    echo "Migrating settings from an older version of box."
+    echo "Migrating settings from an ancient version of box."
     CharSettings[:command] = CharSettings['lockpick_command']
     CharSettings[:calipers] = CharSettings['calipers']
     CharSettings[:window] = CharSettings['window']
@@ -155,7 +192,7 @@ CharSettings[:worn] = :first unless CharSettings[:worn]
 
 
 # We don't want to store this in the DB since it's only relevant for the current session.
-
+# 
 unless $_box_script_status
     $_box_script_status = {
         :scanned => false,
@@ -166,7 +203,8 @@ unless $_box_script_status
 end
 
 module BoxScript
-    VERSION = '0.11 (2019-07-11)'
+    attr_accessor :last_tool, :last_box
+    VERSION = '0.16 (2020-03-03)'
     BOX_NOUNS = %w(box strongbox chest coffer trunk).to_set
     unless defined?(LOCK_DIFFICULTIES)
         LOCK_DIFFICULTIES = {}
@@ -259,6 +297,61 @@ module BoxScript
             return true
         end
     end
+
+    class StreamWindowBase
+        def initialize(id)
+            @buffer = []
+            @id = id
+            @exposed = false
+        end
+
+        def created?
+            false
+        end
+
+        def create(save: false)
+            # noop
+        end
+
+        def expose
+            @buffer << "<exposeStream id='#{@id}' />"
+        end
+
+        def write(contents, expose: true)
+            contents = contents.join('') if contents.is_a?(Array)
+        end
+    end
+
+    class CustomStreamWindow
+        def initialize
+            super('boxresults')
+            @buffer = []
+            @id = id
+        end
+
+        def created?
+            $_box_script_status[:window_created]
+        end
+
+        def create(save: false)
+            return if created?
+            window = REXML::Element.new('streamWindow')
+            window.attributes['id'] = @id
+            window.attributes['title'] = 'Lockpicking'
+            window.attributes['ifclosed'] = ''
+            window.attributes['scroll'] = 'auto'
+            window.attributes['resident'] = 'true'
+            window.attributes['save'] = 'save' if save
+            @buffer << window.to_s
+
+            $_box_script_status[:window_created] = true
+        end
+
+
+
+
+    end
+
 
     def self.get_item_patterns(name, strip_my=true)
         words = name.strip.split(/\s+/)
@@ -369,8 +462,84 @@ module BoxScript
         }
     end
 
-    def self.find_held_box
-        @holding.each{|item| return item if item.id and BOX_NOUNS.include?(item.noun) }
+    def self.find_target_box(pool: true, hands: true)
+        @holding.each{|item| return item if item.id and BOX_NOUNS.include?(item.noun) } if hands
+
+        return unless pool
+        # Options if we're not holding a box, for the box pool system:
+        # - Check all GameObj.loot for something with the character name  ("Akamu's box")
+        # - Check all GameObj.loot CONTENTS for something with the character name  ("Akamu's box")
+        # - Parse REGET
+        # - Try looking on things if an NPC is present.
+        #     Bonus: Use mapdb tags?
+
+        pattern = /\b#{Char.name}'s (?:.* )?(?:box|strongbox|chest|trunk|coffer)$/
+        # echo pattern.inspect
+        if GameObj.loot
+            GameObj.loot.each do |container|
+                # echo container.name
+                return container if container.name =~ pattern
+                if container.contents
+                    container.contents.each do |item|
+                        # echo ">> #{item.name}"
+                        return item if item.name =~ pattern
+                    end
+                end
+            end
+        end
+
+        id = nil
+        noun = nil
+        table = nil
+        reget.each do |xml|
+            if xml =~ /The <a exist="(\d+)" noun="([^"]+)">[^<]+<\/a> is setup .*? <a exist="(\d+)".*for you.*<d cmd='ASK .* ABOUT CHECK/
+                id = $1
+                noun = $2
+                table = $3
+            end
+        end
+
+        if id
+            put "look on ##{table}"
+            return GameObj.new(id, noun, "#{Char.name}'s #{noun}")
+        end
+
+        # Last-ditch effort using metadata.
+        table = find_table
+        return nil unless table
+        fput "look on ##{table.id}"
+        return unless table.contents
+        return table.contents.find{|item| item.name =~ pattern}
+
+        return nil
+    end
+
+    def self.get_meta_tag(tag)
+        rm = Room.current
+        return nil unless rm and rm.id and rm.tags
+        if rm.tags.find{|x| x =~ /meta:boxpool:#{tag}:(.+)/}
+            return $1
+        elsif rm.tags.find{|x| x == "locksmith pool"}
+            echo "This room is tagged as being a locksmith pool, but does not have meta:boxpool:#{tag}:<name> set.  Please ask someone familiar with the mapdb to fix this."
+        end
+        return nil
+    end
+
+    def self.find_table
+        name = get_meta_tag('table')
+        return nil unless name
+        table = GameObj.loot.find{|x| x.name == name}
+        return table if table
+        echo "mapdb error: This room is tagged as having '#{table}' as the box pool table, but it does not appear to be present?"
+        return nil
+    end
+
+    def self.find_npc
+        name = get_meta_tag('npc')
+        return nil unless name
+        npc = GameObj.npcs.find{|x| x.name == name}
+        return npc if npc
+        echo "mapdb error: This room is tagged as having '#{npc}' as the box pool NPC, but it does not appear to be present?"
         return nil
     end
 
@@ -393,7 +562,7 @@ module BoxScript
         }
     end
 
-    def self.window_command(args = nil)
+    def self.cmd_window(args = nil)
         unless $frontend == 'stormfront'
             echo 'This command is only available in the StormFront FE'
             return
@@ -440,7 +609,7 @@ module BoxScript
         Stats.prof == 'Rogue' or Skills.disarmingtraps > 0 or Skills.pickinglocks > 0
     end
 
-    def self.help_command(args = nil)
+    def self.cmd_help(args = nil)
         script = "#{$lich_char}#{@script.name}"
         spacer = ''.ljust(script.length, ' ')
         msg = []
@@ -472,17 +641,26 @@ module BoxScript
             msg << "   #{script} ACCEPT [WAIT]       ACCEPT an offer and remember who offered it.  If 'WAIT' is specified, will"
             msg << "   #{spacer}                     wait for an offer if one is not currently pending.  Items that do not look"
             msg << "   #{spacer}                     like boxes will not be automatically accepted."
+            msg << "   #{spacer}                     Puts ;box in 'customer mode'"
             msg << ''
-            msg << "   #{script} RETURN [<player>]   Return the box you recently accepted to whoever offered it to you, or to"
-            msg << "   #{spacer}                     <player>"
+            msg << "   #{script} JOB                 Ask the box pool worker for a job."
+            msg << "   #{spacer}                     Puts ;box in 'job mode'"
             msg << ''
-            msg << "   #{script} NEXT [<player>]     Same as doing '#{script} RETURN <player>' and '#{script} ACCEPT wait', in"
+            msg << "   #{script} RETURN [<player>]   Customer mode: Return the box you recently accepted to whoever offered it to you,"
+            msg << "   #{spacer}                     or to <player>."
+            msg << "   #{spacer}                     Job mode: Asks the worker to check your work."
+            msg << ''
+            msg << "   #{script} NEXT [<player>]     Customer mode: Does '#{script} RETURN <player>' and '#{script} ACCEPT wait', in"
             msg << "   #{spacer}                     that order."
+            msg << "   #{spacer}                     Job mode: Does '#{script} RETURN' and '#{script} JOB', in that order."
             msg << ''
             msg << "   #{script} DETECT              Detect traps on the currently held box.  Does not attempt to disarm."
             msg << ''
             msg << "   #{script} DISARM [<tool>]     Detect or attempt to disarm the current box, optionally using the specified"
             msg << "   #{spacer}                     tool.  (Specify a tool for traps that require a lockpick or knife to disarm.)"
+            msg << ''
+            msg << "   #{script} SCARABS [<opts>]    Configures the automatic scarab disarming that can happen as part of ;box disarm"
+            msg << "   #{spacer}                     Type `#{script} SCARABS` by itself for more details."
             msg << ''
             msg << "   #{script} UNLOCK [<lockpick>] Unlock the currently held box using the specified lockpick (or the lockpick"
             msg << "   #{spacer}                     currently in your hands).  If <lockpick> consists of multiple words, this "
@@ -546,7 +724,7 @@ module BoxScript
 
         respond msg.join("\n")
 
-        status_command
+        cmd_status
     end
 
     def self.inject_info(line)
@@ -559,31 +737,45 @@ module BoxScript
         return line
     end
 
-    def self.status_command(args = nil)
-        lootsack_command(nil)
-        cust = CharSettings[:customer]
-        if cust
-            diff = (DateTime.now - cust[:when])
-            if diff < 0 # ???
-                ago = "at some point in the wibbly-wobbly timey-wimey future"
-            elsif (diff * 86400) < 5
-                ago = "moments ago"
-            elsif (diff * 86400) < 90
-                ago = "#{(diff * 86400).to_i} seconds ago"
-            elsif (diff * 1440) < 2
-                ago = "about a minute ago"
-            elsif (diff * 1440) < 90
-                ago = "about #{(diff * 1440).to_i} minutes ago"
+    def self.time_delta(timestamp)
+        diff = (DateTime.now - timestamp)
+        if diff < 0 # ???
+            return "at some point in the wibbly-wobbly timey-wimey future"
+        elsif (diff * 86400) < 5
+            return "moments ago"
+        elsif (diff * 86400) < 90
+            return "#{(diff * 86400).to_i} seconds ago"
+        elsif (diff * 1440) < 2
+            return "about a minute ago"
+        elsif (diff * 1440) < 90
+            return "about #{(diff * 1440).to_i} minutes ago"
+        end
+        return "at #{timestamp}"
+    end
+
+    def self.cmd_status(args = nil)
+        cmd_lootsack(nil)
+        cmd_scarab('status')
+
+        if CharSettings[:mode] == :customer
+            cust = CharSettings[:customer]
+            if cust
+                ago = time_delta(cust[:when])
+                respond "Currently in CUSTOMER mode.  Your most recent customer was #{cust[:name]}, who offered you #{cust[:box]} #{ago}."
             else
-                ago = "at #{cust[:when]}"
+                respond "Currently in CUSTOMER mode.  You have no recorded recent customers."
             end
-            respond "Your most recent customer was #{cust[:name]}, who offered you #{cust[:box]} #{ago}."
-        else
-            respond "You have no recorded recent customers."
+        elsif CharSettings[:mode] == :job
+            if CharSettings[:job_started]
+                ago = time_delta(CharSettings[:job_started])
+                respond "Currently in JOB mode.  You started this job #{ago}."
+            else
+                respond "Currently in JOB mode.  You started this job at an unknown time."
+            end
         end
     end
 
-    def self.command_command(args)
+    def self.cmd_command(args)
         unless args
             respond "Your current lockpicking command is: #{CharSettings[:command]}"
             respond
@@ -600,7 +792,7 @@ module BoxScript
         end
     end
 
-    def self.ptrick_command(args)
+    def self.cmd_ptrick(args)
         unless args
             respond "Your current lockpicking command is: #{CharSettings[:command]}"
             respond
@@ -611,15 +803,19 @@ module BoxScript
             respond "For more advanced options regarding your lockpicking command, see #{$lich_char}#{@script.name} COMMAND"
         else
             if args.strip.downcase =~ /^(?:none|clear)$/
-                command_command('pick $B with $L')
+                cmd_command('pick $B with $L')
             else
-                command_command("lmaster ptrick #{args} $B")
+                cmd_command("lmaster ptrick #{args} $B")
             end
         end
     end
 
-    def self.accept_command(args, store=true)
+    def self.cmd_accept(args, store=true)
         $_box_script_status[:last_tool].store
+        unless CharSettings[:mode] == :customer
+            CharSettings[:mode] = :customer
+            echo "Switching to CUSTOMER mode."
+        end
         wait = false
         waiting = false
         if args
@@ -642,17 +838,30 @@ module BoxScript
                     return
                 end
             end
-            if line =~ /You accept <a exist="-?\d+" noun="([^"]+)">.+<\/a> offer and are now holding (?:(.*) )?<a exist="-?\d+" noun="([^"]+)">(?:(.*) )?(?:box|strongbox|coffer|chest|trunk)<\/a>\./
-                box = [$2, $4, $3].find_all{|x| x}.join(' ')
+            if line =~ /(You accept <a exist="-?\d+" noun="([^"]+)">.+<\/a> offer and are now holding (?:(.*) )?<a exist="(-?\d+)" noun="([^"]+)">(?:(.*) )?(?:box|strongbox|coffer|chest|trunk)<\/a>\.)/
+                message = $1
+                customer = $2
+                article = $3
+                exist = $4
+                noun = $5
+                adjective = $6
+
+                box_name = [article, adjective, noun].find_all{|x| x}.join(' ')
                 CharSettings[:customer] = {
-                    :name => $1,
-                    :article => $2,
-                    :noun => $3,
-                    :adjective => $4,
+                    :name => customer,
+                    :article => article,
+                    :adjective => adjective,
+                    :noun => noun,
                     :when => DateTime.now,
-                    :box => box
+                    :box => box_name
                 }
-                echo "Accepted #{box} from #{$1}."
+                box = GameObj.new(exist, noun, "#{adjective} #{noun}".strip)
+                echo "Accepted #{box_name} from #{$2}."
+                return unless window_allowed?
+                checknewbox(box)
+                write_window($1)
+                write_window("\n")
+                _respond condense
                 return
             end
             if waiting and line =~ /^<a.*\/a> offers you .* (?:box|strongbox|coffer|chest|trunk)<\/a>.*  The offer will expire in 30 seconds.$/
@@ -660,6 +869,32 @@ module BoxScript
                 fput 'accept'
             end
         }
+    end
+
+    def self.cmd_job(args=nil, store=true)
+        $_box_script_status[:last_tool].store
+        npc = find_npc
+        unless npc
+            echo "I can't find the NPC to talk to.  Either you're in the wrong room or map metadata may need to be updated."
+            return false
+        end
+        unless CharSettings[:mode] == :job
+            CharSettings[:mode] = :job
+            echo "Switching to JOB mode."
+        end
+        fput "ask ##{npc.id} about job"
+        return unless window_allowed?
+        nil until get =~ /(?:(<pushBold\/>.*<a exist="#{npc.id}".*says, "(?:.*The <a exist="(\d+)" noun="(.*)"|^\s*|.*))|ASK {entity} ABOUT\/FOR\/TO {subject})/
+        return unless $2
+        fput "look on table"
+        box = find_target_box(hands: false)
+        return unless box
+        checknewbox(box)
+        write_window($1)
+        write_window("\n")
+        _respond condense
+
+        CharSettings[:job_started] = DateTime.now
     end
 
     def self.window_allowed?
@@ -690,30 +925,54 @@ module BoxScript
         # return GameObj.containers
     end
 
-    def self.return_command(name = nil)
+    def self.cmd_return(name = nil)
         $_box_script_status[:last_tool].store
-        unless CharSettings[:customer]
-            echo "I don't have anybody to return something to."
-            return
+        case CharSettings[:mode]
+        when :customer
+            unless CharSettings[:customer]
+                echo "I don't have anybody to return something to."
+                return false
+            end
+            # echo CharSettings['customer'].inspect
+            c = CharSettings[:customer]
+            name = c[:name] unless name
+            waitrt?
+            fput "give my #{c[:noun]} to #{name}"  #FIXME
+        when :job
+            npc = find_npc
+            unless npc
+                echo "I can't find the NPC to talk to.  Either you're in the wrong room or map metadata may need to be updated."
+                return false
+            end
+            fput "ask ##{npc.id} about check"
+        else
+            echo "Unknown mode #{CharSettings[:mode]}"
+            return false
         end
-        # echo CharSettings['customer'].inspect
-        c = CharSettings[:customer]
-        name = c[:name] unless name
-        waitrt?
-        fput "give my #{c[:noun]} to #{name}"  #FIXME
+        return true
     end
 
-    def self.next_command(name = nil)
-        unless CharSettings[:customer]
-            echo "I don't have anybody to return something to."
-            return
+    def self.cmd_next(name = nil)
+        return unless cmd_return(name)
+        case CharSettings[:mode]
+        when :customer
+            cmd_accept('wait', false)
+        when :job
+            cmd_job
+        else
+            echo "Unknown mode #{CharSettings[:mode]}"
+            return false
         end
-        return_command(name)
-        accept_command('wait', false)
+        #
+        # unless CharSettings[:customer] or CharSettings[:mode] == :job
+        #     echo "I don't have anybody to return something to."
+        #     return
+        # end
+        # return_command(name)
     end
 
 
-    def self.list_command(args)
+    def self.cmd_list(args)
         containers = resolve_containers(args)
         return unless containers
         boxes = {true => {}, false => {}}
@@ -777,7 +1036,7 @@ module BoxScript
         end
     end
 
-    def self.grab_command(args)
+    def self.cmd_grab(args)
         containers = resolve_containers(args)
         return unless containers
         containers.each {|id, contents|
@@ -790,8 +1049,8 @@ module BoxScript
         echo "I could not locate a locked box on your person."
     end
 
-    def self.drop_command(args)
-        box = find_held_box
+    def self.cmd_drop(args)
+        box = find_target_box(pool: false)
         unless box
             echo "You don't appear to have a box in your hands."
             return
@@ -803,11 +1062,12 @@ module BoxScript
 
     def self.get_box_and_tool(
         toolname=nil,
-        box_not_found: 'You do not appear to be holding a box.',  # Shown if the box is not found
-        tool_not_found: 'Could not find that tool.',  # Shown if the tool is not found.
+        box_not_found: "You don't appear to have a box in your hands or in the pool.  If I'm wrong about the latter, try LOOK ON <whatever container your box is on>.",  # Shown if the box is not found
+        tool_not_found: "Could not find that tool.",  # Shown if the tool is not found.
         tool_ignored: "I could only find that item in '%C', which is an ignored container.",  # Shown if the tool is in an ignored container.
-        hands_full: 'Your hands appear to be full.',  # Shown if hands are full (and the box and tool aren't what's being held)
-        no_tool: nil  # Shown if the non-box hand is empty and no tool was found.  Not an error if nil.
+        hands_full: "Your hands appear to be full.",  # Shown if hands are full (and the box and tool aren't what's being held)
+        no_tool: nil,  # Shown if the non-box hand is empty and no tool was found.  Not an error if nil.
+        requires_box: true  # True if we MUST have a box, false if one can be omitted.
     )
         box = nil
         offhand = nil
@@ -821,7 +1081,8 @@ module BoxScript
             end
         }
 
-        unless box
+        box = find_target_box unless box
+        if box.nil? and requires_box
             echo box_not_found
             return nil, nil
         end
@@ -859,7 +1120,7 @@ module BoxScript
         return box, offhand
     end
 
-    def self.disarm_detect_command(args, command)
+    def self.cmd_disarm_detect(args, command)
         if command == 'detect'
             $_box_script_status[:last_tool].store
             args = nil
@@ -869,8 +1130,95 @@ module BoxScript
 
         checknewbox(box)
         waitrt?
-        start_capture("<a exist=\"#{box.id}\"")
-        fput "#{command} ##{box.id}"
+        result = capture_command("#{command} ##{box.id}", /(?:^Um, but it's open|(?:You carefully begin to examine|Having discovered a trap|You blink in surprise as though just becoming aware).*<a exist="#{box.id}")/)
+        return unless command == 'disarm'
+
+        if result.find{|line| line.include?('You carefully nudge the scarab free of its prison without disturbing the lock too much.  The scarab falls from the lock and onto the ground in front of you.')}
+            scarab = GameObj.loot[0]
+            if scarab
+                if scarab.noun == 'scarab'
+                    echo "Found a scarab #{scarab.inspect}"
+                    waitrt?
+                    if CharSettings[:scarab_disarming]
+                        item.store if item
+                        case CharSettings[:scarab_method]
+                        when :disarm
+                            command = "disarm ##{scarab.id}"
+                            trigger = /You carefully begin to examine the <a exist="#{scarab.id}" .* for traps\.\.\./
+                            CharSettings[:scarab_attempts].times do
+                                result = capture_command(command, trigger)
+                                return unless result
+                            end
+                        when :magic
+                            ranks = {'4' => Spells.minorelemental, '1' => Spells.minorspirit, '12' => Spells.minormental}
+                            possible_spells = []
+                            [408, 417, 1218, 119].each do |num|
+                                spell = Spell[num]
+                                next unless spell.known?
+                                possible_spells << spell
+                            end
+
+                            if scarab.name == 'sea-green glaes scarab'
+                                spell = Spell[114]
+                                possible_spells << spell if spell.known?
+                            elsif scarab.name == 'sky-blue glaes scarab'
+                                spell = Spell[113]
+                                possible_spells << spell if spell.known?
+                            end
+
+                            unless possible_spells.length > 0
+                                echo "No candidate spells found."
+                                return
+                            end
+
+                            echo possible_spells.inspect
+
+                            spell = possible_spells.min do |a, b|
+                                # Compare circle ranks.  Higher is better, so logic reversed
+                                n = ranks[b.circle] <=> ranks[a.circle]
+                                next n if n != 0
+                                # Compare cost, lower is better
+                                next a.cost <=> b.cost
+                            end
+
+                            echo "Using spell #{spell.inspect}.  Cost #{spell.cost}, ranks in circle #{ranks[spell.circle]}"
+                            CharSettings[:scarab_attempts].times do |n|
+                                if n == 0
+                                    waitcastrt?
+                                else
+                                    waitcastrt
+                                end
+
+                                unless spell.affordable?
+                                    echo "Waiting for mana..."
+                                    wait_until { spell.affordable? }
+                                end
+                                spell.cast("##{scarab.id}")
+                            end
+                        else
+                            echo "Unknown scarab disarming method #{CharSettings[:scarab_method].inspect}"
+                            return
+                        end
+
+                        case CharSettings[:scarab_verb]
+                        when nil
+                            return
+                        when :get
+                            fput "get ##{scarab.id}"
+                        when :loot
+                            fput "loot ##{scarab.id}"
+                        else
+                            echo "Unknown scarab verb #{CharSettings[:scarab_verb].inspect}"
+                            return
+                        end
+                    end
+                else
+                    echo "Found a scarab, but the first item in the room is #{scarab.inspect}"
+                end
+            else
+                echo "Theoretically found a scarab, but no loot is in the room?"
+            end
+        end
     end
 
     def self.tool_command(
@@ -879,43 +1227,48 @@ module BoxScript
         tool_not_found_message,
         tool_ignored_message,
         empty_hands_message,
+        requires_box: true,
         &block
     )
         box, item = get_box_and_tool(
             args,
             tool_not_found: tool_not_found_message,
             tool_ignored: tool_ignored_message,
-            no_tool: empty_hands_message
+            no_tool: empty_hands_message,
+            requires_box: requires_box,
         )
-        return unless box
+        return unless box or (item and not requires_box)
         checknewbox(box)
 
         waitrt?
         substitutions = {'$B' => "##{box.id}", '$L' => "##{item.id}", '$T' => "##{item.id}"}
         command = template.gsub(/\$[BLT]/i, substitutions)
         if block_given?
-            yield box, item
+            yield box, item, command
+        else
+            fput command
         end
-        fput command
     end
 
-    def self.unlock_command(args)
+    def self.cmd_unlock(args)
         tool_command(
             args,
             CharSettings[:command],
             'I could not find that lockpick.',
             "I could only find that lockpick in '%C', which is an ignored container.",
             'You don\'t appear to holding a lockpick.'
-        ) {|box, tool|
-            next unless window_allowed?
-            start_capture(
-                /attempt \(d100=|^Um, but it's open\.|^It does not appear to be locked\./, RingBuffer.new(2), "\n[Using your #{tool.name}]\n"
+        ) {|box, tool, command|
+            capture_command(
+                command,
+                /attempt \(d100=|attempt \(d100\(open\)=|^Um, but it's open\.|^It does not appear to be locked\./,
+                RingBuffer.new(2),
+                "\n[Using your #{tool.name}]\n"
             )
         }
     end
 
-    def self.relock_command(args)
-        box = find_held_box
+    def self.cmd_relock(args)
+        box = find_target_box
         if box.contents
             fput "close ##{box.id}"
         end
@@ -925,22 +1278,24 @@ module BoxScript
             'I could not find that lockpick.',
             "I could only find that lockpick in '%C', which is an ignored container.",
             'You don\'t appear to holding a lockpick.'
-        ) {|box, tool|
-            next unless window_allowed?
-            start_capture(
-                /attempt \(d100=|^You should close the .* before you try locking it\.|^The .* is already locked!/, RingBuffer.new(2), "\n[Using your #{tool.name}]\n"
+        ) {|box, tool, command|
+            capture_command(
+                command,
+                /attempt \(d100=|^You should close the .* before you try locking it\.|^The .* is already locked!/,
+                RingBuffer.new(2),
+                "\n[Using your #{tool.name}]\n"
             )
         }
     end
 
-    def self.measure_command(args)
+    def self.cmd_measure(args)
         tool_command(
             CharSettings[:calipers],
             'lmas measure $B',
             'I could not find your calipers.',
             "I could only find your calipers in '%C', which is an ignored container.",
             'You don\'t appear to holding calipers.'
-        ) {|box, tool|
+        ) {|box, tool, command|
             starttrigger = "Using your <a exist=\"#{tool.id}\""
             stage = 0
             buffer = nil
@@ -986,22 +1341,24 @@ module BoxScript
                 end
                 line
             })
+            fput command
         }
     end
 
-    def self.calibrate_command(args)
+    def self.cmd_calibrate(args)
         tool_command(
             CharSettings[:calipers],
             'lmas calibrate $T',
             'I could not find your calipers.',
             "I could only find your calipers in '%C', which is an ignored container.",
-            'You don\'t appear to holding calipers.'
-        ) {|box, tool|
-            start_capture("You make some effort to fine-tune the <a exist=\"#{tool.id}\"")
+            'You don\'t appear to holding calipers.',
+            requires_box: false,
+        ) {|box, tool, command|
+            capture_command(command, /(?:You make some effort to fine-tune the <a exist="#{tool.id}"|^Those calipers could not be more perfectly calibrated\.)/)
         }
     end
 
-    def self.scan_command(args = nil)
+    def self.cmd_scan(args = nil)
         wanted_downstream = @script.want_downstream
         wanted_downstream_xml = @script.want_downstream_xml
         @script.want_downstream_xml = true
@@ -1016,16 +1373,16 @@ module BoxScript
             exist = match[0]
             # next if GameObj.containers.include?(exist)
             fput "look in ##{exist}"
-            loop {
-                line = get
-                if line =~ /(In .* you see)|(There is nothing in there\.)|(That is closed.)|(Peering into the )/
-                    break
-                end
-            }
+            # loop {
+            #     line = get
+            #     if line =~ /(In .* you see)|(There is nothing in there\.)|(That is closed.)|(Peering into the )/
+            #         break
+            #     end
+            # }
         }
     end
 
-    def self.ignore_command(args, ignore)
+    def self.cmd_ignore(args, ignore)
         if args
             if args =~ /^(?:clear|reset)$/
                 CharSettings[:ignored].clear
@@ -1064,7 +1421,7 @@ module BoxScript
         echo "Use #{$lich_char}#{@script.name} UNIGNORE <container> to remove items from the ignore list."
     end
 
-    def self.lootsack_command(args = nil)
+    def self.cmd_lootsack(args = nil)
         if args
             UserVars.lootsack = args
             echo "Your lootsack is now '#{args}'"
@@ -1083,7 +1440,7 @@ module BoxScript
         find_item_anywhere(CharSettings[:calipers])
     end
 
-    def self.calipers_command(args = nil)
+    def self.cmd_calipers(args = nil)
         if args
             CharSettings[:calipers] = args
             echo "Your calipers are now '#{args}'"
@@ -1098,7 +1455,7 @@ module BoxScript
         end
     end
 
-    def self.store_command(args)
+    def self.cmd_store(args)
         unless $_box_script_status[:last_tool]
             echo 'No previous tool to store.'
             return
@@ -1109,7 +1466,7 @@ module BoxScript
         end
     end
 
-    def self.chart_command(args)
+    def self.cmd_chart(args)
         args = args.strip
         if args.length > 0
             pattern = /#{args.split(/\s+/).map{|x| Regexp::escape(x)}.join('.*')}/i
@@ -1130,7 +1487,7 @@ module BoxScript
         respond response.join("\n")
     end
 
-    def self.fetch_command(args)
+    def self.cmd_fetch(args)
         tool = find_item_anywhere(args)
         unless tool
             echo "I could not find anything matching the description '#{args}'"
@@ -1159,11 +1516,22 @@ module BoxScript
         @script.want_downstream = false
         @script.want_downstream_xml = true
 
+        # Buffer of contents to copy to the lockpicking window.
         @buffer = []
+
         @window_option = CharSettings[:window]
 
+        CharSettings[:mode] ||= :customer
+
+        if CharSettings[:scarab_disarming].nil?
+            CharSettings[:scarab_disarming] = false
+            CharSettings[:scarab_attempts] = 1
+            CharSettings[:scarab_method] = :disarm
+            CharSettings[:scarab_verb] = nil
+        end
+
         # Resync what we're holding every time we run
-        # We may change this to 'predict' inventory changes, though.
+        # We may change this mid-script to 'predict' inventory changes, though.
         @holding = [GameObj.right_hand, GameObj.left_hand].find_all{|x| x.id}
 
         cmd, *args = script.vars[1..-1]
@@ -1176,65 +1544,69 @@ module BoxScript
 
         unless cmd
             echo 'No subcommand specified, showing help'
-            help_command
+            cmd_help
             exit
         end
 
         case cmd
             when 'help'
-                help_command(args)
+                cmd_help(args)
             when 'list'
-                list_command(args)
+                cmd_list(args)
             when 'grab'
-                grab_command(args)
+                cmd_grab(args)
             when 'accept'
-                accept_command(args)
+                cmd_accept(args)
+            when 'job'
+                cmd_job(args)
             when 'return'
-                return_command(args)
+                cmd_return(args)
             when 'next'
-                next_command(args)
+                cmd_next(args)
             when 'drop'
-                drop_command(args)
+                cmd_drop(args)
             when 'disarm'
-                disarm_detect_command(args, 'disarm')
+                cmd_disarm_detect(args, 'disarm')
             when 'detect'
-                disarm_detect_command(args, 'detect')
+                cmd_disarm_detect(args, 'detect')
             when 'unlock', 'pick', 'lockpick'
-                unlock_command(args)
+                cmd_unlock(args)
             when 'relock'
-                relock_command(args)
+                cmd_relock(args)
             when 'empty'
-                empty_command(args)
+                cmd_empty(args)
             when 'store'
-                store_command(args)
+                cmd_store(args)
             when 'fetch'
-                fetch_command(args)
+                cmd_fetch(args)
             when 'status'
-                status_command(args)
+                cmd_status(args)
             when 'scan'
-                scan_command(args)
+                cmd_scan(args)
             when 'command'
-                command_command(args)
+                cmd_command(args)
             when 'trick', 'ptrick'
-                ptrick_command(args)
+                cmd_ptrick(args)
             when 'lootsack'
-                lootsack_command(args)
+                cmd_lootsack(args)
             when 'calipers'
-                calipers_command(args)
+                cmd_calipers(args)
             when 'measure', 'meas'
-                measure_command(args)
+                cmd_measure(args)
             when 'calibrate', 'cal'
-                calibrate_command(args)
+                cmd_calibrate(args)
             when 'window'
-                window_command(args)
+                cmd_window(args)
             when 'ignore'
-                ignore_command(args, true)
+                cmd_ignore(args, true)
             when 'unignore'
-                ignore_command(args, false)
+                cmd_ignore(args, false)
             # when 'picksack'
             #   picksack_command(args)
             when 'chart'
-                chart_command(args)
+                cmd_chart(args)
+            when 'scarab', 'scarabs'
+                cmd_scarab(args)
             when 'debug'
                 echo $_box_script_status.inspect
                 echo CharSettings.to_hash.inspect
@@ -1243,11 +1615,127 @@ module BoxScript
         end
     end
 
-    def self.empty_command(args = nil)
+    def self.cmd_scarab(args)
+        # off - Disable scarab disarming
+        # on - Enable scarab disarming
+        # loot - Also loot the scarab
+        # get - Also pick up the scarab
+
+        script = "#{$lich_char}#{@script.name}"
+        spacer = ''.ljust(script.length, ' ')
+        msg = []
+
+        help = proc {
+            msg << "#{script} version #{VERSION}"
+            msg << "Options for #{script} SCARABS:"
+            msg << "    OFF             - Disables all automatic scarab handling."
+            msg << "    ON              - Scarabs will be automatically disarmed as part of ;box disarm"
+            msg << "    GET             - ... and also picked up (using GET)"
+            msg << "    LOOT            - ... and also LOOTed"
+            msg << ''
+            msg << "    DISARM          - Scarabs will be disarmed using the DISARM command.  Also turns scarab disarming on."
+            # msg << "    MAGIC           - Scarabs will be disarmed using an appropriate magical spell, if able.  Also turns scarab disarming on."
+            msg << ''
+            msg << "    X##             - Disarm or cast ## time(s) before considering a scarab safe.  The default is one time."
+            msg << ''
+            msg << "Example:"
+            msg << "    #{script} SCARABS DISARM LOOT x3"
+            msg << "    #{spacer} Will disarm scarabs three times and then loot them."
+            msg << ''
+            msg << "Automatic scarab disarming only applies to boxes disarmed with #{script} DISARM.  #{script} tries hard to only target the scarab produced by your disarm attempt, even if another scarab pops up in the interim."
+        }
+        if args
+            args = args.strip.downcase.split(/\s+/)
+            if args.include?('help') then
+                args = ['help']  # Discard all other args
+            end
+        else
+            args = ['help']
+        end
+
+        settings = {}
+        args.each do |arg|
+            case arg
+            when 'help'
+                help.call
+            when 'off'
+                settings[:scarab_disarming] = false
+            when 'on'
+                settings[:scarab_disarming] = true
+                settings[:scarab_verb] = nil
+            when 'get'
+                settings[:scarab_disarming] = true
+                settings[:scarab_verb] = :get
+            when 'loot'
+                settings[:scarab_disarming] = true
+                settings[:scarab_verb] = :loot
+            when 'disarm'
+                settings[:scarab_disarming] = true
+                settings[:scarab_method] = :disarm
+            # when 'magic'
+            #     settings[:scarab_disarming] = true
+            #     settings[:scarab_method] = :magic
+            when 'status'
+                # quiet noop to suppress help but show configuration
+            else
+                if arg =~ /x(\d+)/
+                    times = $1.to_i
+                    if times < 1
+                        echo "Feeling like making terrible decisions?  You have to disarm scarabs at least once!"
+                        return
+                    else
+                        settings[:scarab_attempts] = times
+                    end
+                else
+                    echo "Unrecognized suboption '#{arg}'.  See `#{$lich_char}#{@script.name} SCARABS HELP for details`"
+                    return
+                end
+            end
+        end
+
+        settings.each {|k,v| CharSettings[k] = v}
+        if CharSettings[:scarab_disarming]
+            msg << "Scarab disarming is currently ENABLED"
+            if CharSettings[:scarab_attempts] == 1
+                times = "once"
+            else
+                times = "#{CharSettings[:scarab_attempts]} times"
+            end
+
+            case CharSettings[:scarab_method]
+            when :disarm
+                msg << "Scarabs will be disarmed using the DISARM command #{times}."
+            when :magic
+                msg << "Scarabs will be disarmed by casting an appropriate magic spell #{times}."
+            else
+                msg << "Scarabs will be disarmed using mysterious means known only to those who write buggy code.  (Invalid setting for CharSettings[:scarab_method]!)"
+            end
+
+            case CharSettings[:scarab_verb]
+            when nil
+                msg << "Afterwards, it will be left on the ground"
+            when :get
+                msg << "Afterwards, it will be picked up"
+            when :loot
+                msg << "Afterwards, it will be LOOTed"
+            else
+                msg << "Afterwards, who knows what will happen?  (Invalid setting for CharSettings[:scarab_verb]!)"
+            end
+        else
+            msg << "Scarab disarming is currently DISABLED."
+        end
+        respond msg
+
+        if CharSettings[:scarab_verb]
+            _respond "#{monsterbold_start}WARNING: Automatic scarab looting is experimental.  IT MAY KILL YOU.\r\n(But it shouldn't, unless you just flat out failed the scarab disarm.)#{monsterbold_end}"
+        end
+    end
+
+    def self.cmd_empty(args = nil)
         $_box_script_status[:last_tool].store
-        box = find_held_box
+        box = find_target_box(pool: false)
         unless box
-            echo "You don't appear to have a box in your hands."
+            echo "You don't appear to have a box in your hands or in the pool.  If I'm wrong about the latter, try LOOK ON <whatever container your box is on>."
             return
         end
 
@@ -1271,7 +1759,7 @@ module BoxScript
 
     def self.create_window(force = false)
         return unless window_allowed?
-        return if $_box_script_status[:windowcreated] unless force
+        return if $_box_script_status[:window_created] unless force
 
         window = REXML::Element.new('streamWindow')
         window.attributes['id'] = 'boxresults'
@@ -1281,7 +1769,7 @@ module BoxScript
         window.attributes['resident'] = 'true'
         window.attributes['save'] = 'save' if @window_option == 'save'
         @buffer << window.to_s
-        $_box_script_status[:windowcreated] = true
+        $_box_script_status[:window_created] = true
         expose_window
     end
 
@@ -1307,44 +1795,57 @@ module BoxScript
         xml.gsub(/<(?!(?:a )|(?:\/a)).*?>/, '')
     end
 
-    def self.start_capture(trigger, buffer=nil, intro="\n", timeout=60)
+    def self.capture_command(command, trigger, buffer=nil, intro="\n", timeout=60)
         # Starts capture when trigger_start happens, and outputs the `context` lines before it.
         # Ends capture when trigger_end happens, and possibly includes that capture in the output
         # Abort if more than a certain amount of time passes to avoid breakage.
-        return unless window_allowed?
         output = nil
+        result = []
 
         if trigger.is_a?(String)
             trigger = Regexp.new(Regexp::escape(trigger))
         end
 
-        timeout = Time::now + timeout
-        create_window
-
-        DownstreamHook.add('BoxScript::WindowCapture', proc {|line|
-            DownstreamHook.remove('BoxScript::WindowCapture') if Time::now > timeout
-            if line.strip.length > 0
-                if output
-                    if line.include?('<prompt')
-                        DownstreamHook.remove('BoxScript::WindowCapture')
-                        write_window(output, false)
-                        line += condense
-                    else
-                        output.push(strip_most_xml(line))
-                    end
-                else
-                    if line =~ trigger
-                        output = [intro]
-                        output += buffer.to_a.map {|line| strip_most_xml(line)} if buffer
-                        buffer = nil
-                        output.push(strip_most_xml(line))
-                    elsif buffer
-                        buffer.push(line)
-                    end
+        begin
+            Timeout::timeout(timeout, Interrupt) {
+                if window_allowed?
+                    DownstreamHook.add('BoxScript::WindowCapture', proc {|line|
+                        if line.strip.length > 0
+                            if output
+                                if line.include?('<prompt')
+                                    DownstreamHook.remove('BoxScript::WindowCapture')
+                                    write_window(output, false)
+                                    line += condense
+                                else
+                                    output.push(strip_most_xml(line))
+                                end
+                            else
+                                if line =~ trigger
+                                    output = [intro]
+                                    output += buffer.to_a.map {|line| strip_most_xml(line)} if buffer
+                                    buffer = nil
+                                    output.push(strip_most_xml(line))
+                                elsif buffer
+                                    buffer.push(line)
+                                end
+                            end
+                        end
+                        next line
+                    })
                 end
+            }
+            fput command
+            nil until (xml = get) =~ trigger
+            result << xml
+            until (xml = get).include?('<prompt')
+                result << xml.rstrip
             end
-            line
-        })
+        rescue Interrupt
+            DownstreamHook.remove('BoxScript::WindowCapture') if window_allowed?
+            echo "Timed out waiting #{timeout} seconds for the result of '#{command}'"
+            return nil
+        end
+        return result
     end
 
     def self.escape_xml(text)

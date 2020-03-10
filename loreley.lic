@@ -1,0 +1,140 @@
+def convert_script(what)
+    return what.strip.split(/\s*\n\s*\n\s*/).map do |chunk|
+        chunk.gsub!("\n", ";")
+        if chunk[0] == '!'
+            next chunk[1..-1]
+        else
+            next "sing #{chunk}"
+        end
+    end
+end
+
+script = convert_script(%{
+!Play theo slow
+
+A fierce one-eyed man named Baron LaBonne
+A meaner pirate had never been known
+  And he sailed
+    on the Dark Lady
+
+!Play theo mournful 1
+
+A ship strong and sound with a perilous crew
+And high on the mast the skull and bones flew
+  Fleet and swift
+    was the Dark Lady
+
+!Play theo slow 7
+
+And every night the Baron would drink a toast
+He'd say, "Here's to my lovely lady host!
+My one true love..."
+
+"Hear, hear!" the crew replied
+And the Dark Lady sighed.
+
+
+
+!Play theo somber 1
+
+A rich Nalfein galleon was spotted one night
+The Dark Lady's crew prepared for the fight
+  Clash of swords…
+    No elf had survived it
+
+!Play theo somber 3
+
+Except for the maiden with dark eyes so bold
+Found in the hull with the jewels and the gold
+  LaBonne laughed
+    and took her for ransom
+
+!Play theo inspiring 2
+
+And every night the Baron would drink a toast
+He'd say, "Here's to my lovely lady host!
+My one true love..."
+
+"Hear, hear!" the crew replied
+And the Dark Lady sighed.
+
+
+
+!Play theo slow 3
+
+The girl Carlotta was a beauty quite rare
+With each passing night LaBonne couldn't bear
+  His empty bed.
+    He brought her to it.
+
+!Play theo intense 2
+
+The Baron soon found he felt more than desire
+His love for her grew and his soul filled with fire
+  He proclaimed
+    that they would marry.
+
+!Play theo intense 3
+
+That night the Baron drank with jubilee
+And said, "Here's to my lovely bride to be!
+My one true love..."
+
+"Hear, hear!" the crew replied
+And the Dark Lady cried.
+
+
+
+!Play theo intense 4
+
+The following night a storm brewed at sea
+The Dark Lady saw her chance to be free
+  Of her rival
+    the beauty Carlotta
+
+!Play theo intense 5
+
+The ship steered herself to the heart of the gale
+Where a wave swept the maiden out over the rail
+  Sweet revenge
+    on an unfaithful lover.
+
+!Play theo mournful 6
+
+That night the Lady drank a toast
+And said, "Here's to your lovely lady host!
+Your one true love..."
+
+No voices replied
+And the Dark Lady smiled.
+
+
+
+!Play theo mournful 4
+
+And now any night when a storm fills the sky
+They say that a ghost ship sails in its eye
+  Fleet and swift
+    is the Dark Lady
+
+!Play theo mournful 7
+
+A ship strong and sound with a perilous crew
+And high on the mast the skull and bones flew
+  While the captain
+    gazes out to sea.
+
+And every night the Baron must drink a toast
+He says, "Here's to our lovely lady host!
+My one true love..."
+
+"Hear, hear," the ghost crew replies
+And the Dark Lady smiles.
+
+!Play stop
+})
+
+script.each do |line|
+    put line
+    pause_script
+end

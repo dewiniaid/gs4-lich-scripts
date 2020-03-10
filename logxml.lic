@@ -10,9 +10,14 @@
 
 	 author: LostRanger (thisgenericname@gmail.com)
 	   game: any
-  version: 0.3 (2017-04-24)
+    version: 0.4.1 (2019-12-28)
 
   changelog:
+    0.4.1 (2019-12-28):
+      * Implement 0.4, correctly.
+    0.4 (2019-12-28):
+      * ';logxml streams' will now include pushStream and popStream messages.  Note that this may be very, very noisy
+        due to room window updates and such.
     0.3 (2017-04-24):
       * fix output including both XML and plaintext from downstream.
     0.2 (2017-04-23):
@@ -39,6 +44,8 @@ script.want_script_output = false
 script.want_upstream = true
 script.want_downstream = false
 script.want_downstream_xml = true
+
+log_streams = script.vars.include?("streams")
 
 Thread.new {
 	begin
@@ -75,7 +82,7 @@ loop {
 	begin
 		30000.times {
 			line = get
-			unless line =~ /^<(?:push|pop)Stream/
+			if log_streams or line !~ /^<(?:push|pop)Stream/
 				file.puts line
 			end
 		}

@@ -30,9 +30,12 @@
 	  tags: Magic, QOL
 	  required: Lich >= 4.6.0.
 
-  version: 0.5 (2017-07-19)
+  version: 0.6 (2019-11-30)
 
   changelog:
+    version 0.6 (2019-11-30)
+      * Condense APPRAISE GROUP messaging.  (Unless you're a cleric, sorry.)
+
     version 0.5.1 (2019-07-19)
       * Remove inadvertently-left-in debugging code.
 
@@ -110,8 +113,8 @@
 
 
 class SpellMerge
-    VERSION = '0.5.1 (2019-07-19)'
-    VERSION_INT = 500001
+    VERSION = '0.6 (2019-11-30)'
+    VERSION_INT = 600000
 
     DEFAULT_SETTINGS = {
         'delay' =>  0.1,   # Spell merge delay, in seconds.
@@ -354,7 +357,15 @@ class SpellMerge
         # Effect.new(:group, '@ is also a member of your group.', proc{|names| "Your group consists of #{names}."}),
 
         # SIGNAL
-        Effect.new(:signal, "@ acknowledged your signal.", prompt: true)
+        Effect.new(:signal, "@ acknowledged your signal.", prompt: true),
+
+        # APPRAISE GROUP
+        Effect.new(:appraise,
+           '/You take a quick appraisal of @ and find that (?:<a.*>|he|she) has no apparent injuries\./',
+           'You take a quick appraisal of @ and find that they have no apparent injuries.',
+           prompt: true
+        ),  # 1613
+
     ]
     # EFFECTS.each{|e| echo e.pattern.inspect }
 
@@ -1002,6 +1013,11 @@ class SpellMerge
                 "Version 0.5.1 changes:",
                 '',
                 "  * Remove accidental debugging code left in regarding changelog handling.",
+            ],
+            600000 => [
+                "Version 0.6 changes:",
+                '',
+                "  * Condense APPRAISE GROUP messaging.  (Unless you're a cleric, sorry.)",
             ],
         }
 

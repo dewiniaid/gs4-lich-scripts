@@ -9,16 +9,18 @@ Note that the Lich repository is probably more up-to-date than the Github; see e
 ## What's Relatively New
 (These are repeated in the other lists):
 
-**ExpandedView**: When looking in containers, show item full names ("an opalescent glass jar containing selanthian 
-bloodjewels") rather than short names ("an opalescent glass jar").  Only needed if you don't use `FLAG SORTEDVIEW`.
+**Tour**: Travel the world without going anywhere.  While ;tour is running, most movement commands only pretend to move you.  This allows you to look at room descriptions and other attributes without actually visiting them.
 
-**Rested**: Keeps you online until your head is clear, your mana is full, and (if Dreaven or Iteno are around) you are 
-Dreavened.
+**DragStop**: Automatically stop dragging a corpse when they stop being a corpse or they arrive at a town or Voln.  (You can manually start dragging again if you need to move them more.)  
 
-**No-Pronoun-Links**: Removes links from around `(he|she|his|her|him|it|its|himself|herself|itself)`
+**DoctorWho**: Highlights (in monsterbold, for now) when you receive healing from a player, so you can see Who your Doctor was.
 
-**SortedSkills**: Shows SKILLS, SKILLS FULL, SKILLS BASE, or SKILLS BASE FULL output in the same order it appears on
-the Excel character training spreadsheet to make it easier to match up issues in your training. 
+**Route2**: This is a troubleshooting script that outputs details on the route that would be taken by ;go2 -- either
+from your current room to your destination (`;route2 228`) or between two different rooms (`;route source target`).
+
+**Triage**: Triage creates a Stormfront window displaying the status of lifekeep, injuries, linked clerics and chrisms
+for dead bodies.  Only works for clerics and paladins.  Non-Stormfront users can access the same information using the
+`TRIAGE` verb (no semicolon) while the script is running. 
 
 **Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
 troubleshooting information.
@@ -26,7 +28,13 @@ troubleshooting information.
 **ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
 INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
 (rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
-is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
+is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.
+
+**Fixit**: Fixit is an attempt to automatically fix various Lich issues.  It tries things like restarting infomon,
+doing `;magic reset`, `SPELL ACTIVE`, `SKILL FULL`, `INFO` in that order, and a handful of other things.  It's intended
+as a simple first thing to try if something is misbehaving.
+
+**TLogin**: TLogin is a fork of `;login` that uses the same login information to log you into the GS Test instance.
 
 ## Noteworthy Scripts For Everyone
 
@@ -89,26 +97,50 @@ Dreavened.
 **No-Pronoun-Links**: Removes links from around `(he|she|his|her|him|it|its|himself|herself|itself)`
 
 **SortedSkills**: Shows SKILLS, SKILLS FULL, SKILLS BASE, or SKILLS BASE FULL output in the same order it appears on
-the Excel character training spreadsheet to make it easier to match up issues in your training. 
+the Excel character training spreadsheet to make it easier to match up issues in your training.
 
-**Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
-troubleshooting information.
+**Triage**: Triage creates a Stormfront window displaying the status of lifekeep, injuries, linked clerics and chrisms
+for dead bodies.  Only works for clerics and paladins.  Non-Stormfront users can access the same information using the
+`TRIAGE` verb (no semicolon) while the script is running. 
 
 **ReVerb**: Reverb improves built-in verbs and tries to make it as seamless as possible.  Among other things, it allows
 INV to work without RT (Ask Wyrom why this is even a thing), causes GIVE to prioritize players in the current room 
 (rather than a realm away), allows GIVE \<player\> ALL to give a player all your silver (without seeing how much that 
-is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.   
+is first), prevents PUT from dropping items, and prevents awkward mishaps with SMILE.
 
+**DoctorWho**: Highlights (in monsterbold, for now) when you receive healing from a player, so you can see Who your Doctor was.
+
+**TLogin**: TLogin is a fork of `;login` that uses the same login information to log you into the GS Test instance.
+
+**Go2Table**: Take you to the nearest available table.
+
+**InTown**: Automatically perform actions after being in town for awhile, like killing `;spellactive`
+ 
 ## Developer Tools
 
 **LogXML**: Logs all of the raw XML sent/received by the game.  Similar to `;log`
 
-**ShowXML**: Opens a Stormfront window that shows XML sent/received by the game in realtime.  (**StormFront Only**)
+**ShowXML**: Opens a Stormfront window that shows XML sent/received by the game in realtime.  (**StormFront/Profanity Only**)
 
 **MenuID**: Clicking on an item link dumps information on what the item ID is and other miscellaneous info.  Also 
 allows underscore commands to be directly input in Stormfront.  (**StormFront Only**)   
 
 **Mapnav**: Tools for map database fixing.
+
+**Version**: Version what version of Ruby, Lich, and assorted other things you are using -- along with some other
+troubleshooting information.  Can also report what version of a specific script or scripts you have downloaded.
+
+**Fixit**: Fixit is an attempt to automatically fix various Lich issues.  It tries things like restarting infomon,
+doing `;magic reset`, `SPELL ACTIVE`, `SKILL FULL`, `INFO` in that order, and a handful of other things.  It's intended
+as a simple first thing to try if something is misbehaving.
+
+**Route2**: This is a troubleshooting script that outputs details on the route that would be taken by ;go2 -- either
+from your current room to your destination (`;route2 228`) or between two different rooms (`;route source target`).
+
+**Metamap**: Metamap is a tool for specifying information like proper names and categories for maps.  Its metadata is 
+used by XNarost and possibly some other scripts.
+
+**Tour**: Travel the world without going anywhere.  While ;tour is running, most movement commands only pretend to move you.  This allows you to look at room descriptions and other attributes without actually visiting them.
 
 ## Misc/Unsupported
 

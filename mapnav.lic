@@ -14,11 +14,103 @@
 	required: Lich >= 4.2.0
 
 	changelog:
+		0.2 (2019-11-04)
+			added explicit room merging feature.
 		0.1.1 (2017-04-17):
 			fixed 'save' not terminating script
 		0.1 (2017-04-17):
 			initial release
 =end
+
+def do_merge(from, to)
+	first_room = Room[[from.to_i, to.to_i].min]
+	second_room = Room[[from.to_i, to.to_i].max]
+	second_room.title.each { |title| first_room.title.push(title) unless first_room.title.include?(title) }
+	second_room.description.each { |desc| first_room.description.push(desc) unless first_room.description.include?(desc) }
+	second_room.paths.each { |paths| first_room.paths.push(paths) unless first_room.paths.include?(paths) }
+	if first_room.location.nil?
+		first_room.location = second_room.location
+	end
+	second_room.wayto.each_pair { |adj_room,way|
+		unless first_room.wayto.keys.include?(adj_room)
+			first_room.wayto[adj_room] = way
+			first_room.timeto[adj_room] = second_room.timeto[adj_room]
+		end
+	}
+	# map_done.delete(second_room.id)
+	# map_pending.delete(second_room.id.to_s)
+	# fix_done.delete(second_room.id)
+	# fix_pending.delete(second_room.id.to_s)
+	key = second_room.id.to_s
+	Map.list[second_room.id] = nil
+	Map.list.each { |room|
+		if room.wayto.keys.include?(key)
+			room.wayto[first_room.id.to_s] = room.wayto[key]
+			room.timeto[first_room.id.to_s] = room.timeto[key]
+			room.wayto.delete(key)
+			room.timeto.delete(key)
+		end
+	}
+	Map.list.each { |room|
+		room.wayto.each_pair { |rm,way|
+			if (way.class == Proc) and way._dump =~ /#{second_room.id.to_s}/
+				respond
+				respond "#{room.id} => #{rm}"
+				respond way._dump
+				respond
+				clear
+				echo 'this path refrences the deleted room number'
+				echo "replace #{second_room.id} with #{first_room.id}? (send yes/no)"
+				respond
+				line = nil
+				line = get until line =~ /^yes$|^no$/i
+				if line =~ /^yes$/i
+					room.wayto[rm] = StringProc.new(way._dump.gsub(second_room.id.to_s, first_room.id.to_s))
+				end
+			end
+		}
+	}
+	# 
+	# 
+	# msg = []
+	# msg << "Will merge room #{from.to_s}"
+	# msg << "into room #{to.to_s}"
+	# msg << ""
+	# msg << "Afterwards, room ##{from.id} will be deleted and ##{to.id} will remain."
+	# 
+	# # Find descriptions that will be merged.
+	# descriptions_to_add = []
+	# paths_to_add = []
+	# to_skip = 0
+	# rmfrom.description.each do |desc|
+	# 	if rmto.description.include?(desc)
+	# 		to_skip += 1
+	# 	else
+	# 		descriptions_to_add << desc
+	# 	end
+	# end
+	# msg << "#{to_skip.length} room description(s) already exist on the target."
+	# msg << "#{descriptions_to_add.length} room description(s) will be added." unless descriptions_to_add.length == 0
+	# rmfrom.paths.each do |desc|
+	# 	if rmto.paths.include?(desc)
+	# 		to_skip += 1
+	# 	else
+	# 		paths_to_add << desc
+	# 	end
+	# end
+	# msg <<
+	# 	msg << "#{descriptions_to_add.length} sets of obvious paths/exits already exist on the target."
+	# 
+	# msg << "#{to_skip.length} room description(s) already exist."
+	# 
+	# 
+	# 
+	# 
+end
+
+
+
+
 
 command = script.vars[0].downcase
 
@@ -57,6 +149,9 @@ if not command or command == "help"
 	msg << "   #{script_starter} retarget OLDID NEWID"
 	msg << "   #{script_spacerr}            Change exits in current room that point to OLD to now point to NEW"
 	msg << ''
+	msg << "   #{script_starter} merge TO FROM"
+	msg << "   #{script_spacerr}            Explicitly merge duplicate room FROM into room TO."
+	msg << ''
 	msg << "   #{script_starter} save       Save the map database."
 
 	msg << ''
@@ -94,6 +189,33 @@ if command == "save"
 	Map.save
 	echo "map data saved"
 	exit
+end
+
+if command =~ /^merge(.*$)/
+	if $1 =~ /\s+(\d+)\s+(\d+)$/
+		rmto = Room[$1]
+		rmfrom = Room[$2]
+
+		unless rmto
+			echo "'to' room ##{$1} not found!"
+			exit
+		end
+		unless rmfrom
+			echo "'from' room ##{$2} not found!"
+			exit
+        end
+        
+        echo rmto
+        echo rmfrom
+        echo "If these rooms are the same, unpause the script."
+        pause_script
+        
+        
+        do_merge(rmto.id, rmfrom.id)
+        exit
+    else
+        echo "Incorrect syntax.  See help."
+    end
 end
 
 if command =~ /^retarget(.*)$/
@@ -151,16 +273,21 @@ end
 old_wayto = origin.wayto[destination_id]
 if old_wayto == command
 	echo "'#{command}' from room ##{origin_id} already goes to ##{destination_id}, no changes made."
-	exit
-elsif old_wayto
-	echo "Replacing previous wayto '#{old_wayto}'"
-end
+else
+	if old_wayto
+		echo "Replacing previous wayto '#{old_wayto}'"
+	end
 	
-origin.wayto[destination_id] = command
-if origin.timeto[destination_id].nil?
-	origin.timeto[destination_id] = 0.2  # Seems to be a default, not entirely certain what it does (Maybe factor in RT?)
+	origin.wayto[destination_id] = command
+	if origin.timeto[destination_id].nil?
+		origin.timeto[destination_id] = 0.2  # Seems to be a default, not entirely certain what it does (Maybe factor in RT?)
+	end
+
+	echo "'#{command}' from room ##{origin_id} now goes to ##{destination_id}."
 end
 
-echo "'#{command}' from room ##{origin_id} now goes to ##{destination_id}."
-
-
+origin.wayto.find_all{|k, v| v == command && k != destination_id}.each do |k, v|
+    echo "Deleting conflicting wayto going to room #{k} (timeto=#{origin.timeto[k].inspect})"
+	origin.wayto.delete(k)
+	origin.timeto.delete(k)
+end
